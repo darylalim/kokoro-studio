@@ -21,7 +21,8 @@ uv run streamlit run streamlit_app.py
 - **Lint**: `uv run ruff check .`
 - **Format**: `uv run ruff format .`
 - **Typecheck**: `uv run ty check`
-- **Test**: `uv run pytest`
+- **Unit tests**: `uv run pytest`
+- **Integration tests**: `uv run pytest tests_integration/`
 
 ## Code Style
 
@@ -39,7 +40,7 @@ uv run streamlit run streamlit_app.py
 
 ## Configuration
 
-`pyproject.toml` — project metadata, dependencies, dependency groups, ruff isort (`combine-as-imports`), pytest (`pythonpath`), ty (`python-version = "3.12"`).
+`pyproject.toml` — project metadata, dependencies, dependency groups, ruff isort (`combine-as-imports`), pytest (`pythonpath`, `testpaths`), ty (`python-version = "3.12"`).
 
 ## Architecture
 
@@ -50,6 +51,8 @@ uv run streamlit run streamlit_app.py
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
 - `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import
 - `tests/test_streamlit_app.py` — unit tests
+- `tests_integration/conftest.py` — clears `streamlit`/`misaki`/`mlx_audio`/`huggingface_hub` from `sys.modules` so AppTest gets the real modules; incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
+- `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching
 
 ### Key Functions
 

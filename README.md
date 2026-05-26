@@ -39,4 +39,5 @@ uv run streamlit run streamlit_app.py
 - **Lint**: `uv run ruff check .`
 - **Format**: `uv run ruff format .`
 - **Typecheck**: `uv run ty check`
-- **Test**: `uv run pytest`
+- **Unit tests**: `uv run pytest`
+- **Integration tests**: `uv run pytest tests_integration/`
