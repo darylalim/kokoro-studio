@@ -1311,7 +1311,7 @@ class TestSampleButtonsConfig:
             assert random_count == 1, f"{lang} has {random_count} random buttons"
 
     def test_button_tuples_have_correct_shape(self) -> None:
-        for lang, buttons in SAMPLE_BUTTONS.items():
+        for buttons in SAMPLE_BUTTONS.values():
             for entry in buttons:
                 assert len(entry) == 3
                 label, filename, is_random = entry
