@@ -277,7 +277,7 @@ def _render_sample_buttons(lang_code: str) -> None:
             st.button(
                 label,
                 key=f"sample_{lang_code}_{Path(filename).stem}",
-                use_container_width=True,
+                width="stretch",
                 on_click=_set_text_from_sample,
                 args=(lang_code, filename, is_random),
             )
@@ -371,7 +371,7 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 "▶ Play",
                 key=f"play_{voice}",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not text.strip(),
             )
         key = _cache_key(voice, text, card_speed, lang_code)
