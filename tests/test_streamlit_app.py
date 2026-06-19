@@ -129,7 +129,7 @@ class TestLoadPipeline:
         from mlx_audio.tts.utils import load_model
 
         load_pipeline()
-        load_model.assert_called_with(REPO_ID)  # type: ignore
+        load_model.assert_called_with(REPO_ID)  # ty: ignore[unresolved-attribute]
 
 
 class TestCreateG2p:
@@ -137,36 +137,36 @@ class TestCreateG2p:
         from misaki import en
 
         _create_g2p("a")
-        en.G2P.assert_called()  # type: ignore
-        call_kwargs = en.G2P.call_args[1]  # type: ignore
+        en.G2P.assert_called()  # ty: ignore[unresolved-attribute]
+        call_kwargs = en.G2P.call_args[1]  # ty: ignore[unresolved-attribute]
         assert call_kwargs["british"] is False
 
     def test_british_english_uses_en_g2p_with_british(self) -> None:
         from misaki import en
 
         _create_g2p("b")
-        call_kwargs = en.G2P.call_args[1]  # type: ignore
+        call_kwargs = en.G2P.call_args[1]  # ty: ignore[unresolved-attribute]
         assert call_kwargs["british"] is True
 
     def test_japanese_uses_ja_g2p(self) -> None:
         from misaki import ja
 
         _create_g2p("j")
-        ja.JAG2P.assert_called()  # type: ignore
+        ja.JAG2P.assert_called()  # ty: ignore[unresolved-attribute]
 
     def test_chinese_uses_zh_g2p(self) -> None:
         from misaki import zh
 
         _create_g2p("z")
-        zh.ZHG2P.assert_called()  # type: ignore
+        zh.ZHG2P.assert_called()  # ty: ignore[unresolved-attribute]
 
     def test_espeak_languages_use_espeak_g2p(self) -> None:
         from misaki import espeak
 
         for code, espeak_lang in ESPEAK_LANGUAGES.items():
-            espeak.EspeakG2P.reset_mock()  # type: ignore
+            espeak.EspeakG2P.reset_mock()  # ty: ignore[unresolved-attribute]
             _create_g2p(code)
-            espeak.EspeakG2P.assert_called_with(language=espeak_lang)  # type: ignore
+            espeak.EspeakG2P.assert_called_with(language=espeak_lang)  # ty: ignore[unresolved-attribute]
 
 
 class TestLoadTokenizer:
@@ -184,7 +184,7 @@ class TestTokenizeText:
         from misaki import en
 
         mock_g2p = MagicMock(return_value=(phonemes, None))
-        en.G2P.return_value = mock_g2p  # type: ignore
+        en.G2P.return_value = mock_g2p  # ty: ignore[unresolved-attribute]
         return mock_g2p
 
     def test_returns_phonemes(self) -> None:
@@ -211,7 +211,7 @@ class TestTokenizeText:
     def test_returns_empty_for_none_phonemes(self) -> None:
         from misaki import en
 
-        en.G2P.return_value = MagicMock(return_value=(None, None))  # type: ignore
+        en.G2P.return_value = MagicMock(return_value=(None, None))  # ty: ignore[unresolved-attribute]
 
         result = tokenize_text("", "a")
 
@@ -224,29 +224,29 @@ class TestTokenizeText:
 
         from misaki import en
 
-        call_kwargs = en.G2P.call_args[1]  # type: ignore
+        call_kwargs = en.G2P.call_args[1]  # ty: ignore[unresolved-attribute]
         assert call_kwargs["british"] is True
 
     def test_japanese_uses_ja_g2p(self) -> None:
         from misaki import ja
 
-        ja.JAG2P.reset_mock()  # type: ignore
-        ja.JAG2P.return_value = MagicMock(return_value=("konniʧiwa", None))  # type: ignore
+        ja.JAG2P.reset_mock()  # ty: ignore[unresolved-attribute]
+        ja.JAG2P.return_value = MagicMock(return_value=("konniʧiwa", None))  # ty: ignore[unresolved-attribute]
 
         result = tokenize_text("こんにちは", "j")
 
         assert result == "konniʧiwa"
-        ja.JAG2P.assert_called_once()  # type: ignore
+        ja.JAG2P.assert_called_once()  # ty: ignore[unresolved-attribute]
 
     def test_spanish_uses_espeak_g2p(self) -> None:
         from misaki import espeak
 
-        espeak.EspeakG2P.return_value = MagicMock(return_value=("ola", None))  # type: ignore
+        espeak.EspeakG2P.return_value = MagicMock(return_value=("ola", None))  # ty: ignore[unresolved-attribute]
 
         result = tokenize_text("hola", "e")
 
         assert result == "ola"
-        espeak.EspeakG2P.assert_called_with(language="es")  # type: ignore
+        espeak.EspeakG2P.assert_called_with(language="es")  # ty: ignore[unresolved-attribute]
 
 
 class TestGenerateSpeech:
@@ -337,7 +337,7 @@ class TestGenerateOne:
     def _mock_tokenizer(self, phonemes: str = "hɛlˈoʊ") -> None:
         from misaki import en
 
-        en.G2P.return_value = MagicMock(return_value=(phonemes, None))  # type: ignore
+        en.G2P.return_value = MagicMock(return_value=(phonemes, None))  # ty: ignore[unresolved-attribute]
 
     def test_returns_voice_result(self) -> None:
         self._mock_tokenizer()
@@ -648,14 +648,14 @@ class TestFindStaleCachedAudio:
 class TestRenderVoiceCard:
     @staticmethod
     def _reset_mocks() -> None:
-        st.container.reset_mock()  # type: ignore
-        st.markdown.reset_mock()  # type: ignore
-        st.button.reset_mock()  # type: ignore
-        st.button.return_value = False  # type: ignore
-        st.selectbox.reset_mock()  # type: ignore
-        st.audio.reset_mock()  # type: ignore
-        st.caption.reset_mock()  # type: ignore
-        st.download_button.reset_mock()  # type: ignore
+        st.container.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.markdown.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.button.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.button.return_value = False  # ty: ignore[unresolved-attribute]
+        st.selectbox.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.audio.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.caption.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.download_button.reset_mock()  # ty: ignore[unresolved-attribute]
         for k in list(st.session_state):
             if isinstance(k, str) and k.startswith("audio:"):
                 del st.session_state[k]
@@ -663,12 +663,12 @@ class TestRenderVoiceCard:
     def test_renders_bordered_container(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.container.assert_called_once_with(border=True)  # type: ignore
+        st.container.assert_called_once_with(border=True)  # ty: ignore[unresolved-attribute]
 
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # type: ignore
+        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
 
     def test_badge_when_cached_at_current_speed(self) -> None:
         self._reset_mocks()
@@ -678,7 +678,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # type: ignore
+        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # ty: ignore[unresolved-attribute]
 
     def test_badge_when_cached_at_other_speed(self) -> None:
         self._reset_mocks()
@@ -688,7 +688,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # type: ignore
+        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # ty: ignore[unresolved-attribute]
 
     def test_no_badge_when_cache_for_different_text(self) -> None:
         self._reset_mocks()
@@ -698,7 +698,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # type: ignore
+        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
 
     def test_no_badge_when_cache_for_different_voice(self) -> None:
         self._reset_mocks()
@@ -708,38 +708,38 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # type: ignore
+        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
 
     def test_play_button_key_is_voice_specific(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        assert st.button.call_args[1]["key"] == "play_af_heart"  # type: ignore
+        assert st.button.call_args[1]["key"] == "play_af_heart"  # ty: ignore[unresolved-attribute]
 
     def test_play_button_uses_primary_type(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        assert st.button.call_args[1]["type"] == "primary"  # type: ignore
+        assert st.button.call_args[1]["type"] == "primary"  # ty: ignore[unresolved-attribute]
 
     def test_play_button_label(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        assert st.button.call_args[0][0] == "▶ Play"  # type: ignore
+        assert st.button.call_args[0][0] == "▶ Play"  # ty: ignore[unresolved-attribute]
 
     def test_play_disabled_when_text_empty(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "", "a")
-        assert st.button.call_args[1]["disabled"] is True  # type: ignore
+        assert st.button.call_args[1]["disabled"] is True  # ty: ignore[unresolved-attribute]
 
     def test_play_enabled_when_text_nonempty(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        assert st.button.call_args[1]["disabled"] is False  # type: ignore
+        assert st.button.call_args[1]["disabled"] is False  # ty: ignore[unresolved-attribute]
 
     def test_renders_speed_selectbox(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
         speed_call = next(
-            (c for c in st.selectbox.call_args_list if c.args and c.args[0] == "Speed"),  # type: ignore
+            (c for c in st.selectbox.call_args_list if c.args and c.args[0] == "Speed"),  # ty: ignore[unresolved-attribute]
             None,
         )
         assert speed_call is not None
@@ -749,7 +749,7 @@ class TestRenderVoiceCard:
     def test_speed_format_func_renders_x_suffix(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        calls = st.selectbox.call_args_list  # type: ignore
+        calls = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
         speed_call = next(c for c in calls if c.args and c.args[0] == "Speed")
         assert speed_call.kwargs["format_func"](1.0) == "1.0x"
         assert speed_call.kwargs["format_func"](0.7) == "0.7x"
@@ -763,13 +763,13 @@ class TestRenderVoiceCard:
             "phonemes": "hɛlˈoʊ",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.audio.assert_called_once()  # type: ignore
+        st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
         del st.session_state[key]
 
     def test_no_audio_when_not_cached(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "never_cached_for_this_test", "a")
-        st.audio.assert_not_called()  # type: ignore
+        st.audio.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_audio_uses_correct_sample_rate_when_cached(self) -> None:
         self._reset_mocks()
@@ -780,14 +780,14 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        assert st.audio.call_args[1]["sample_rate"] == SAMPLE_RATE  # type: ignore
+        assert st.audio.call_args[1]["sample_rate"] == SAMPLE_RATE  # ty: ignore[unresolved-attribute]
         del st.session_state[key]
 
     def test_renders_stale_audio_with_caption_when_only_other_speed_cached(
         self,
     ) -> None:
         self._reset_mocks()
-        st.caption.reset_mock()  # type: ignore
+        st.caption.reset_mock()  # ty: ignore[unresolved-attribute]
         # Cache key uses speed=0.7, but the conftest selectbox mock returns 1.0
         old_key = _cache_key("af_heart", "hello", 0.7, "a")
         st.session_state[old_key] = {
@@ -796,13 +796,13 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.audio.assert_called_once()  # type: ignore
-        st.caption.assert_called_once_with("Click Play to refresh (speed changed)")  # type: ignore
+        st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
+        st.caption.assert_called_once_with("Click Play to refresh (speed changed)")  # ty: ignore[unresolved-attribute]
         del st.session_state[old_key]
 
     def test_no_stale_caption_when_fresh_audio_cached(self) -> None:
         self._reset_mocks()
-        st.caption.reset_mock()  # type: ignore
+        st.caption.reset_mock()  # ty: ignore[unresolved-attribute]
         # Both fresh (1.0) and stale (0.7) cached
         fresh_key = _cache_key("af_heart", "hello", 1.0, "a")
         stale_key = _cache_key("af_heart", "hello", 0.7, "a")
@@ -817,8 +817,8 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.audio.assert_called_once()  # type: ignore
-        st.caption.assert_not_called()  # type: ignore
+        st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
+        st.caption.assert_not_called()  # ty: ignore[unresolved-attribute]
         del st.session_state[fresh_key]
         del st.session_state[stale_key]
 
@@ -830,7 +830,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.download_button.assert_called_once()  # type: ignore
+        st.download_button.assert_called_once()  # ty: ignore[unresolved-attribute]
 
     def test_download_button_file_name_includes_voice_and_speed(self) -> None:
         self._reset_mocks()
@@ -840,7 +840,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        kwargs = st.download_button.call_args[1]  # type: ignore
+        kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
         assert kwargs["file_name"] == "af_heart_1.0x.wav"
         assert kwargs["mime"] == "audio/wav"
         assert kwargs["key"] == "download_af_heart"
@@ -853,7 +853,7 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        kwargs = st.download_button.call_args[1]  # type: ignore
+        kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
         assert isinstance(kwargs["data"], bytes)
         assert kwargs["data"][:4] == b"RIFF"
 
@@ -866,16 +866,16 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.download_button.assert_not_called()  # type: ignore
+        st.download_button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_no_download_button_when_no_cached_audio(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.download_button.assert_not_called()  # type: ignore
+        st.download_button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_click_populates_cache_and_calls_generate(self) -> None:
         self._reset_mocks()
-        st.button.return_value = True  # type: ignore
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
         fake_result = {
             "audio": np.ones(50, dtype=np.float32),
             "voice": "af_heart",
@@ -896,20 +896,20 @@ class TestRenderVoiceCard:
 
     def test_click_handles_generate_error(self) -> None:
         self._reset_mocks()
-        st.button.return_value = True  # type: ignore
-        st.exception.reset_mock()  # type: ignore
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        st.exception.reset_mock()  # ty: ignore[unresolved-attribute]
         with (
             patch("streamlit_app.load_pipeline"),
             patch("streamlit_app.generate_one", side_effect=RuntimeError("boom")),
         ):
             render_voice_card("af_heart", "hello", "a")
-        st.exception.assert_called_once()  # type: ignore
+        st.exception.assert_called_once()  # ty: ignore[unresolved-attribute]
         expected_key = _cache_key("af_heart", "hello", 1.0, "a")
         assert expected_key not in st.session_state
 
     def test_click_triggers_eviction(self) -> None:
         self._reset_mocks()
-        st.button.return_value = True  # type: ignore
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
         fake_result = {
             "audio": np.ones(50, dtype=np.float32),
             "voice": "af_heart",
@@ -927,7 +927,7 @@ class TestRenderVoiceCard:
 
     def test_no_stale_audio_when_text_differs(self) -> None:
         self._reset_mocks()
-        st.caption.reset_mock()  # type: ignore
+        st.caption.reset_mock()  # ty: ignore[unresolved-attribute]
         # Stale audio exists but for different text
         old_key = _cache_key("af_heart", "different_text", 0.7, "a")
         st.session_state[old_key] = {
@@ -936,62 +936,62 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.audio.assert_not_called()  # type: ignore
-        st.caption.assert_not_called()  # type: ignore
+        st.audio.assert_not_called()  # ty: ignore[unresolved-attribute]
+        st.caption.assert_not_called()  # ty: ignore[unresolved-attribute]
         del st.session_state[old_key]
 
 
 class TestRenderPhonemes:
     def test_renders_expander_and_code(self) -> None:
-        st.expander.reset_mock()  # type: ignore
-        st.code.reset_mock()  # type: ignore
+        st.expander.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.code.reset_mock()  # ty: ignore[unresolved-attribute]
         render_phonemes("hɛlˈoʊ")
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=False)  # type: ignore
-        st.code.assert_called_once_with("hɛlˈoʊ")  # type: ignore
+        st.expander.assert_called_once_with("Phoneme Tokens", expanded=False)  # ty: ignore[unresolved-attribute]
+        st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_expanded_flag_forwarded(self) -> None:
-        st.expander.reset_mock()  # type: ignore
+        st.expander.reset_mock()  # ty: ignore[unresolved-attribute]
         render_phonemes("x", expanded=True)
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # type: ignore
+        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # ty: ignore[unresolved-attribute]
 
 
 class TestRenderPersistentPhonemes:
     @staticmethod
     def _reset_mocks() -> None:
-        st.expander.reset_mock()  # type: ignore
-        st.code.reset_mock()  # type: ignore
+        st.expander.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.code.reset_mock()  # ty: ignore[unresolved-attribute]
         st.session_state.pop("last_phonemes", None)
 
     def test_no_render_when_nothing_cached(self) -> None:
         self._reset_mocks()
         _render_persistent_phonemes("hello", "a")
-        st.expander.assert_not_called()  # type: ignore
+        st.expander.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_renders_when_text_and_lang_match(self) -> None:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("hello", "a")
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # type: ignore
-        st.code.assert_called_once_with("hɛlˈoʊ")  # type: ignore
+        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # ty: ignore[unresolved-attribute]
+        st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_no_render_when_text_differs(self) -> None:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("world", "a")
-        st.expander.assert_not_called()  # type: ignore
+        st.expander.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_no_render_when_lang_differs(self) -> None:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("hello", "b")
-        st.expander.assert_not_called()  # type: ignore
+        st.expander.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_renders_again_when_returning_to_matched_text(self) -> None:
         # User typed "hello", tokenized, switched text, switched back
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("hello", "a")
-        st.expander.assert_called_once()  # type: ignore
+        st.expander.assert_called_once()  # ty: ignore[unresolved-attribute]
 
 
 class TestPronunciationTips:
@@ -1134,7 +1134,7 @@ class TestEnsureRepoDownloaded:
         from huggingface_hub import snapshot_download
 
         ensure_repo_downloaded()
-        snapshot_download.assert_called()  # type: ignore
+        snapshot_download.assert_called()  # ty: ignore[unresolved-attribute]
 
 
 class TestVoiceGrades:
@@ -1224,24 +1224,24 @@ class TestPhonemeBand:
 class TestRenderLengthCaption:
     @staticmethod
     def _reset_mocks() -> None:
-        st.caption.reset_mock()  # type: ignore
+        st.caption.reset_mock()  # ty: ignore[unresolved-attribute]
         st.session_state.pop("last_phonemes", None)
 
     def test_empty_text_renders_nothing(self) -> None:
         self._reset_mocks()
         _render_length_caption("", "a")
-        st.caption.assert_not_called()  # type: ignore
+        st.caption.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_whitespace_only_renders_nothing(self) -> None:
         self._reset_mocks()
         _render_length_caption("   \n  ", "a")
-        st.caption.assert_not_called()  # type: ignore
+        st.caption.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_estimate_used_when_no_cached_phonemes(self) -> None:
         self._reset_mocks()
         _render_length_caption("hello world", "a")
-        st.caption.assert_called_once()  # type: ignore
-        arg = st.caption.call_args[0][0]  # type: ignore
+        st.caption.assert_called_once()  # ty: ignore[unresolved-attribute]
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert "~" in arg
         assert "9 phonemes" in arg
         assert "very short" in arg
@@ -1251,8 +1251,8 @@ class TestRenderLengthCaption:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello world", "a", "x" * 50)
         _render_length_caption("hello world", "a")
-        st.caption.assert_called_once()  # type: ignore
-        arg = st.caption.call_args[0][0]  # type: ignore
+        st.caption.assert_called_once()  # ty: ignore[unresolved-attribute]
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert "~" not in arg
         assert "50 phonemes" in arg
         assert "short" in arg
@@ -1262,21 +1262,21 @@ class TestRenderLengthCaption:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("other text", "a", "x" * 200)
         _render_length_caption("hello world", "a")
-        arg = st.caption.call_args[0][0]  # type: ignore
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert "~" in arg
 
     def test_estimate_used_when_cached_for_different_lang(self) -> None:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello world", "b", "x" * 200)
         _render_length_caption("hello world", "a")
-        arg = st.caption.call_args[0][0]  # type: ignore
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert "~" in arg
 
     def test_ideal_band_renders_green(self) -> None:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("xyz", "a", "x" * 250)
         _render_length_caption("xyz", "a")
-        arg = st.caption.call_args[0][0]  # type: ignore
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert ":green[" in arg
         assert "ideal" in arg
 
@@ -1284,7 +1284,7 @@ class TestRenderLengthCaption:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("xyz", "a", "x" * 600)
         _render_length_caption("xyz", "a")
-        arg = st.caption.call_args[0][0]  # type: ignore
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert ":red[" in arg
         assert "will be chunked" in arg
 
@@ -1292,7 +1292,7 @@ class TestRenderLengthCaption:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("xyz", "a", "x" * 450)
         _render_length_caption("xyz", "a")
-        arg = st.caption.call_args[0][0]  # type: ignore
+        arg = st.caption.call_args[0][0]  # ty: ignore[unresolved-attribute]
         assert ":orange[" in arg
         assert "long" in arg
 
@@ -1399,32 +1399,32 @@ class TestPickSample:
 class TestRenderSampleButtons:
     @staticmethod
     def _reset_mocks() -> None:
-        st.button.reset_mock()  # type: ignore
-        st.button.return_value = False  # type: ignore
-        st.columns.reset_mock()  # type: ignore
-        st.rerun.reset_mock()  # type: ignore
+        st.button.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.button.return_value = False  # ty: ignore[unresolved-attribute]
+        st.columns.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.rerun.reset_mock()  # ty: ignore[unresolved-attribute]
         st.session_state.pop("text_input", None)
 
     def test_renders_nothing_for_unknown_language(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("xx")
-        st.columns.assert_not_called()  # type: ignore
-        st.button.assert_not_called()  # type: ignore
+        st.columns.assert_not_called()  # ty: ignore[unresolved-attribute]
+        st.button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_creates_one_column_per_button(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        st.columns.assert_called_once_with(3)  # type: ignore
+        st.columns.assert_called_once_with(3)  # ty: ignore[unresolved-attribute]
 
     def test_renders_one_button_per_entry(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        assert st.button.call_count == 3  # type: ignore
+        assert st.button.call_count == 3  # ty: ignore[unresolved-attribute]
 
     def test_button_keys_are_language_and_filename_scoped(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        keys = [call.kwargs.get("key") for call in st.button.call_args_list]  # type: ignore
+        keys = [call.kwargs.get("key") for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         assert "sample_a_random" in keys
         assert "sample_a_gatsby" in keys
         assert "sample_a_frankenstein" in keys
@@ -1432,13 +1432,13 @@ class TestRenderSampleButtons:
     def test_button_uses_on_click_callback(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        for call in st.button.call_args_list:  # type: ignore
+        for call in st.button.call_args_list:  # ty: ignore[unresolved-attribute]
             assert call.kwargs.get("on_click") is _set_text_from_sample
 
     def test_button_args_match_entry(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        seen_args = [call.kwargs.get("args") for call in st.button.call_args_list]  # type: ignore
+        seen_args = [call.kwargs.get("args") for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         expected = [
             ("a", fname, is_random) for _, fname, is_random in SAMPLE_BUTTONS["a"]
         ]
@@ -1447,13 +1447,13 @@ class TestRenderSampleButtons:
     def test_renders_for_non_english_language(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("j")
-        st.columns.assert_called_once_with(3)  # type: ignore
-        assert st.button.call_count == 3  # type: ignore
+        st.columns.assert_called_once_with(3)  # ty: ignore[unresolved-attribute]
+        assert st.button.call_count == 3  # ty: ignore[unresolved-attribute]
 
     def test_button_labels_use_localized_text(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("j")
-        labels = [call.args[0] for call in st.button.call_args_list]  # type: ignore
+        labels = [call.args[0] for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         assert any("こころ" in label for label in labels)
 
 

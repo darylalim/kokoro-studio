@@ -148,7 +148,7 @@ def get_voices(lang_code: str) -> list[str]:
 
 @st.cache_resource
 def load_pipeline() -> Any:
-    return load_model(REPO_ID)  # type: ignore
+    return load_model(REPO_ID)  # ty: ignore[invalid-argument-type]
 
 
 def _create_g2p(lang_code: str) -> Any:
