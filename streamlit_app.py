@@ -66,9 +66,13 @@ DEFAULT_SPEED_INDEX: int = SPEED_OPTIONS.index(1.0)
 AUDIO_CACHE_LIMIT: int = 20
 
 _PHONEME_MULTIPLIERS: dict[str, float] = {
-    "a": 0.85, "b": 0.85,
-    "e": 0.90, "f": 0.90, "p": 0.90,
-    "h": 1.00, "i": 1.00,
+    "a": 0.85,
+    "b": 0.85,
+    "e": 0.90,
+    "f": 0.90,
+    "p": 0.90,
+    "h": 1.00,
+    "i": 1.00,
     "j": 1.40,
     "z": 2.00,
 }
@@ -144,7 +148,7 @@ def get_voices(lang_code: str) -> list[str]:
 
 @st.cache_resource
 def load_pipeline() -> Any:
-    return load_model(REPO_ID)  # type: ignore[arg-type]
+    return load_model(REPO_ID)  # type: ignore
 
 
 def _create_g2p(lang_code: str) -> Any:
@@ -425,7 +429,9 @@ st.title("Kokoro Studio")
 try:
     ensure_repo_downloaded()
 except Exception:
-    st.error("Could not download the Kokoro model. Connect to the internet and reload the page.")
+    st.error(
+        "Could not download the Kokoro model. Connect to the internet and reload the page."
+    )
     st.stop()
 
 language = st.selectbox(
