@@ -1,5 +1,5 @@
 [project]
-name = "kokoro-pipeline"
+name = "kokoro-studio"
 version = "0.13.0"
 description = "Generate multilingual speech with the Hexgrad Kokoro model on Apple Silicon with MLX."
 requires-python = ">=3.12"

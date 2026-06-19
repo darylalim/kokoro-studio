@@ -746,7 +746,7 @@ wheels = [
 ]
 
 [[package]]
-name = "kokoro-pipeline"
+name = "kokoro-studio"
 version = "0.13.0"
 source = { virtual = "." }
 dependencies = [

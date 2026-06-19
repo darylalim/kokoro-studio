@@ -24,7 +24,7 @@ class TestInitialRender:
 
     def test_title_and_language_default(self) -> None:
         at = _run_app()
-        assert at.title[0].value == "Kokoro Pipeline"
+        assert at.title[0].value == "Kokoro Studio"
         assert at.selectbox(key="language").value == "American English"
 
     def test_gender_checkboxes_start_unchecked(self) -> None:

@@ -420,7 +420,7 @@ def _render_persistent_phonemes(text: str, lang_code: str) -> None:
         render_phonemes(saved[2], expanded=True)
 
 
-st.title("Kokoro Pipeline")
+st.title("Kokoro Studio")
 
 try:
     ensure_repo_downloaded()

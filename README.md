@@ -1,4 +1,4 @@
-# Kokoro Pipeline
+# Kokoro Studio
 
 Generate multilingual speech with the [Hexgrad Kokoro model](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
