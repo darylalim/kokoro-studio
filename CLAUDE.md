@@ -29,6 +29,7 @@ uv run streamlit run streamlit_app.py
 - snake_case for functions/variables, PascalCase for classes
 - Type annotations on all parameters and returns
 - isort with combine-as-imports (configured in `pyproject.toml`)
+- When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and ruff to ensure best practices are followed.
 
 ## Dependencies
 
