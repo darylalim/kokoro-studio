@@ -102,3 +102,26 @@ class TestLanguageSwitching:
         japanese_titles = set(_voice_titles(at))
         assert japanese_titles
         assert japanese_titles != american_titles
+
+
+class TestVoiceCards:
+    def test_each_visible_voice_has_speed_selectbox_default_1x(self) -> None:
+        at = _run_app()
+        # American English voices, best grade first.
+        for voice in ("af_heart", "af_bella", "am_adam"):
+            assert at.selectbox(key=f"speed_{voice}").value == 1.0
+
+    def test_changing_card_speed_keeps_app_healthy(self) -> None:
+        # The per-card speed selectbox drives the @st.fragment-wrapped card; the
+        # app must rerun cleanly and reflect the new value.
+        at = _run_app()
+        at.selectbox(key="speed_af_heart").select(1.5).run()
+        assert not at.exception
+        assert at.selectbox(key="speed_af_heart").value == 1.5
+
+    def test_play_buttons_enabled_after_typing(self) -> None:
+        at = _run_app()
+        at.text_area[0].input("hello world").run()
+        play_buttons = [b for b in at.button if b.label == "▶ Play"]
+        assert len(play_buttons) >= 3  # one per visible American English voice
+        assert not any(b.disabled for b in play_buttons)

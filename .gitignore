@@ -5,7 +5,9 @@ __pycache__/
 # Tools
 .pytest_cache/
 .ruff_cache/
-.streamlit/
+.streamlit/*
+# ...but ship the app theme + server config
+!.streamlit/config.toml
 
 # macOS
 .DS_Store

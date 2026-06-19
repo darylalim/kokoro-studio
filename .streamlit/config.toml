@@ -1,0 +1,29 @@
+[server]
+fileWatcherType = "none"
+
+# Kokoro Studio — "Kokoro indigo" theme. Shared values live in [theme]; the
+# light and dark blocks define both modes so the toolbar mode toggle is shown.
+[theme]
+primaryColor = "#6366F1"
+baseRadius = "8px"
+linkUnderline = false
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+
+[theme.light]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f8fa"
+textColor = "#1f2328"
+borderColor = "#d0d7de"
+redColor = "#cf222e"
+orangeColor = "#bf8700"
+greenColor = "#1a7f37"
+
+[theme.dark]
+backgroundColor = "#0d1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#e6edf3"
+borderColor = "#30363d"
+redColor = "#ff7b72"
+orangeColor = "#e3b341"
+greenColor = "#3fb950"

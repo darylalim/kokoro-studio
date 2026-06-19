@@ -1,8 +1,9 @@
+import hashlib
 import io
 import random
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, NamedTuple, NotRequired, TypedDict
 
 import numpy as np
 import soundfile as sf
@@ -18,6 +19,7 @@ class VoiceResult(TypedDict):
     audio: np.ndarray
     voice: str
     phonemes: str
+    seq: NotRequired[int]
 
 
 class SampleButton(NamedTuple):
@@ -131,7 +133,7 @@ def ensure_repo_downloaded() -> str:
     try:
         return snapshot_download(REPO_ID, local_files_only=True)
     except LocalEntryNotFoundError:
-        with st.spinner("Downloading Kokoro model and voices (one-time, ~160 MB)..."):
+        with st.spinner("Downloading Kokoro model and voices (one-time, ~355 MB)..."):
             return snapshot_download(REPO_ID)
 
 
@@ -213,8 +215,13 @@ def _split_voices_for_display(
     return top, tail
 
 
+def _text_digest(text: str) -> str:
+    # Stable across processes (unlike hash()), so cache keys are reproducible.
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
 def _cache_key(voice: str, text: str, speed: float, lang_code: str) -> str:
-    return f"audio:{voice}:{lang_code}:{speed}:{hash(text)}"
+    return f"audio:{voice}:{lang_code}:{speed}:{_text_digest(text)}"
 
 
 def _estimate_phonemes(text: str, lang_code: str) -> int:
@@ -283,19 +290,27 @@ def _render_sample_buttons(lang_code: str) -> None:
             )
 
 
+def _next_audio_seq() -> int:
+    seq = st.session_state.get("_audio_seq", 0) + 1
+    st.session_state["_audio_seq"] = seq
+    return seq
+
+
 def _find_stale_cached_audio(
     voice: str, text: str, lang_code: str
 ) -> VoiceResult | None:
     prefix = f"audio:{voice}:{lang_code}:"
-    suffix = f":{hash(text)}"
+    suffix = f":{_text_digest(text)}"
     matches = [
-        k
+        st.session_state[k]
         for k in st.session_state
         if isinstance(k, str) and k.startswith(prefix) and k.endswith(suffix)
     ]
     if not matches:
         return None
-    return st.session_state[matches[-1]]
+    # Most recently generated wins. st.session_state iterates a hash-ordered set,
+    # not insertion order, so recency must come from the stored seq, not position.
+    return max(matches, key=lambda r: r.get("seq", 0))
 
 
 def _evict_old_audio() -> None:
@@ -303,9 +318,12 @@ def _evict_old_audio() -> None:
         k for k in st.session_state if isinstance(k, str) and k.startswith("audio:")
     ]
     overflow = len(audio_keys) - AUDIO_CACHE_LIMIT
-    if overflow > 0:
-        for k in audio_keys[:overflow]:
-            del st.session_state[k]
+    if overflow <= 0:
+        return
+    # Drop the oldest by generation order (lowest seq); never trust iteration order.
+    audio_keys.sort(key=lambda k: st.session_state[k].get("seq", 0))
+    for k in audio_keys[:overflow]:
+        del st.session_state[k]
 
 
 def _audio_to_wav_bytes(audio: np.ndarray) -> bytes:
@@ -351,6 +369,7 @@ def generate_one(
     return {"audio": np.concatenate(chunks), "voice": voice, "phonemes": phonemes}
 
 
+@st.fragment
 def render_voice_card(voice: str, text: str, lang_code: str) -> None:
     with st.container(border=True):
         cached = _find_stale_cached_audio(voice, text, lang_code)
@@ -378,10 +397,12 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
         if play_clicked:
             try:
                 pipeline = load_pipeline()
-                st.session_state[key] = generate_one(
-                    text, voice, pipeline, card_speed, lang_code
-                )
+                result = generate_one(text, voice, pipeline, card_speed, lang_code)
+                result["seq"] = _next_audio_seq()
+                st.session_state[key] = result
                 _evict_old_audio()
+            except ValueError as e:
+                st.error(str(e))
             except Exception as e:
                 st.exception(e)
         if key in st.session_state:
@@ -424,6 +445,7 @@ def _render_persistent_phonemes(text: str, lang_code: str) -> None:
         render_phonemes(saved[2], expanded=True)
 
 
+st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")
 st.title("Kokoro Studio")
 
 try:

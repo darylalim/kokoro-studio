@@ -26,6 +26,7 @@ from streamlit_app import (
     _format_voice,
     _gender_code_from_checkboxes,
     _load_sample,
+    _next_audio_seq,
     _phoneme_band,
     _pick_sample,
     _render_length_caption,
@@ -33,6 +34,7 @@ from streamlit_app import (
     _render_sample_buttons,
     _set_text_from_sample,
     _split_voices_for_display,
+    _text_digest,
     ensure_repo_downloaded,
     generate_one,
     generate_speech,
@@ -509,6 +511,7 @@ class TestEvictOldAudio:
                 "audio": np.zeros(1, dtype=np.float32),
                 "voice": f"v{i}",
                 "phonemes": "x",
+                "seq": i,
             }
 
     @staticmethod
@@ -556,6 +559,24 @@ class TestEvictOldAudio:
         # First 5 keys evicted
         for i in range(5):
             assert f"audio:v{i}:a:1.0:{i}" not in st.session_state
+        self._clear_audio_cache()
+
+    def test_evicts_lowest_seq_not_insertion_order(self) -> None:
+        # seq, not st.session_state iteration order, decides the eviction victim.
+        # Insert so the oldest (lowest seq) is the LAST key inserted.
+        self._clear_audio_cache()
+        n = AUDIO_CACHE_LIMIT + 1
+        for i in range(n):
+            st.session_state[f"audio:v{i}:a:1.0:{i}"] = {
+                "audio": np.zeros(1, dtype=np.float32),
+                "voice": f"v{i}",
+                "phonemes": "x",
+                "seq": n - i,  # last-inserted v{n-1} has the lowest seq (=1)
+            }
+        _evict_old_audio()
+        assert self._count_audio_keys() == AUDIO_CACHE_LIMIT
+        assert f"audio:v{n - 1}:a:1.0:{n - 1}" not in st.session_state  # lowest seq
+        assert "audio:v0:a:1.0:0" in st.session_state  # highest seq survives
         self._clear_audio_cache()
 
     def test_preserves_non_audio_session_keys(self) -> None:
@@ -633,15 +654,40 @@ class TestFindStaleCachedAudio:
             "audio": np.zeros(10, dtype=np.float32),
             "voice": "af_heart",
             "phonemes": "x",
+            "seq": 1,
         }
         st.session_state[key_15] = {
             "audio": np.ones(10, dtype=np.float32),
             "voice": "af_heart",
             "phonemes": "x",
+            "seq": 2,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
         assert result is not None
         assert result["audio"][0] == 1.0
+        self._clear_audio_cache()
+
+    def test_returns_highest_seq_regardless_of_insertion_order(self) -> None:
+        # Recency must come from seq, not st.session_state iteration order:
+        # insert the 1.5 entry first but mark 0.7 as generated more recently.
+        self._clear_audio_cache()
+        key_07 = _cache_key("af_heart", "hello", 0.7, "a")
+        key_15 = _cache_key("af_heart", "hello", 1.5, "a")
+        st.session_state[key_15] = {
+            "audio": np.zeros(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
+        }
+        st.session_state[key_07] = {
+            "audio": np.ones(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 2,
+        }
+        result = _find_stale_cached_audio("af_heart", "hello", "a")
+        assert result is not None
+        assert result["audio"][0] == 1.0  # higher-seq 0.7 entry, not last-inserted
         self._clear_audio_cache()
 
 
@@ -904,6 +950,28 @@ class TestRenderVoiceCard:
         ):
             render_voice_card("af_heart", "hello", "a")
         st.exception.assert_called_once()  # ty: ignore[unresolved-attribute]
+        expected_key = _cache_key("af_heart", "hello", 1.0, "a")
+        assert expected_key not in st.session_state
+
+    def test_click_renders_clean_error_for_no_audio(self) -> None:
+        # A benign "No audio generated" (ValueError) gets a friendly st.error,
+        # not a raw developer traceback via st.exception.
+        self._reset_mocks()
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        st.error.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.exception.reset_mock()  # ty: ignore[unresolved-attribute]
+        with (
+            patch("streamlit_app.load_pipeline"),
+            patch(
+                "streamlit_app.generate_one",
+                side_effect=ValueError("No audio generated. Check your input text."),
+            ),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+        st.error.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+            "No audio generated. Check your input text."
+        )
+        st.exception.assert_not_called()  # ty: ignore[unresolved-attribute]
         expected_key = _cache_key("af_heart", "hello", 1.0, "a")
         assert expected_key not in st.session_state
 
@@ -1484,3 +1552,36 @@ class TestSetTextFromSample:
         self._reset()
         _set_text_from_sample("j", "kokoro.txt", False)
         assert "私" in st.session_state["text_input"]
+
+
+class TestTextDigest:
+    def test_is_deterministic(self) -> None:
+        assert _text_digest("hello world") == _text_digest("hello world")
+
+    def test_differs_for_different_text(self) -> None:
+        assert _text_digest("hello") != _text_digest("world")
+
+    def test_is_16_hex_chars(self) -> None:
+        digest = _text_digest("hello")
+        assert len(digest) == 16
+        assert all(c in "0123456789abcdef" for c in digest)
+
+    def test_known_value_is_stable_across_processes(self) -> None:
+        # Hard-coded sha1("hello")[:16]; identical in every interpreter process,
+        # unlike the previous hash(text). Catches any future digest change.
+        assert _text_digest("hello") == "aaf4c61ddcc5e8a2"
+
+    def test_handles_unicode(self) -> None:
+        assert len(_text_digest("こんにちは")) == 16
+
+
+class TestNextAudioSeq:
+    def test_starts_at_one_when_unset(self) -> None:
+        st.session_state.pop("_audio_seq", None)
+        assert _next_audio_seq() == 1
+
+    def test_increments_monotonically(self) -> None:
+        st.session_state.pop("_audio_seq", None)
+        assert _next_audio_seq() == 1
+        assert _next_audio_seq() == 2
+        assert _next_audio_seq() == 3

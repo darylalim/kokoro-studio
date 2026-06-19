@@ -7,6 +7,9 @@ from unittest.mock import MagicMock
 _st = MagicMock()
 _st.cache_resource = lambda f: f
 _st.cache_data = lambda *args, **_kw: args[0] if args else (lambda f: f)
+# @st.fragment must pass the decorated function through unchanged, supporting
+# both bare `@st.fragment` and parametrized `@st.fragment(...)` forms.
+_st.fragment = lambda func=None, **_kw: func if func is not None else (lambda g: g)
 _st.selectbox.side_effect = lambda label, **_kw: {
     "Language": "American English",
     "Speed": 1.0,
