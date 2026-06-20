@@ -43,6 +43,8 @@ uv run streamlit run streamlit_app.py
 
 `pyproject.toml` — project metadata, dependencies, dependency groups, ruff isort (`combine-as-imports`), pytest (`pythonpath`, `testpaths`), ty (`python-version = "3.12"`).
 
+`.streamlit/config.toml` — `[server] fileWatcherType = "none"` plus the "Kokoro indigo" theme: indigo `primaryColor` (`#6366F1`), `8px` radius, Inter / JetBrains Mono fonts, and `[theme.light]`/`[theme.dark]` blocks defining both modes (with red/orange/green tuned to match the utterance-length caption bands). The app calls `st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")` as its first Streamlit command.
+
 ## Architecture
 
 ### Files
@@ -50,10 +52,11 @@ uv run streamlit run streamlit_app.py
 - `streamlit_app.py` — main app: language selector, text input + per-language sample buttons + Tokenize button + utterance-length caption + pronunciation note (left column), gender checkboxes + per-card voice grid with per-card Play button + speed dropdown + inline audio playback + download button (right column)
 - `voice_grades.py` — quality-grade table (`VOICE_GRADES`), rank table (`_GRADE_RANK`), and `_grade_rank` helper extracted from the Kokoro model card; consumed by the voice picker for sorting and labeling
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
-- `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import
+- `.streamlit/config.toml` — server config (`fileWatcherType = "none"`) plus the "Kokoro indigo" `[theme]` with `[theme.light]`/`[theme.dark]` blocks (so the toolbar mode toggle appears); the only `.streamlit/` file checked in (a `.gitignore` exception)
+- `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import; the `streamlit` mock provides identity-pass-through shims for `cache_resource`, `cache_data`, and `fragment` so decorated functions keep running their real bodies under test
 - `tests/test_streamlit_app.py` — unit tests
 - `tests_integration/conftest.py` — clears `streamlit`/`misaki`/`mlx_audio`/`huggingface_hub` from `sys.modules` so AppTest gets the real modules; incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
-- `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching
+- `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching, per-card speed controls
 
 ### Key Functions
 
@@ -64,14 +67,20 @@ uv run streamlit run streamlit_app.py
 - `_create_g2p` — creates language-specific misaki G2P object
 - `tokenize_text` — returns phoneme string without running inference
 - `generate_speech` — generator yielding audio arrays per chunk; takes `lang_code` parameter
-- `generate_one` — runs `generate_speech` inside an `st.status` block, concatenates chunks, returns a single `VoiceResult`
+- `generate_one` — runs `generate_speech` inside an `st.status` block, concatenates chunks, returns a single `VoiceResult` (`audio`, `voice`, `phonemes`; the caller adds a monotonic `seq`)
 - `_format_voice` — formats a raw voice ID into a display label with optional grade suffix (e.g. `af_heart` → `"Heart (female) — A"`); ungraded voices show just `"Name (gender)"`. Used as the card title.
 - `_grade_rank` — maps a voice ID to its numeric sort rank via `VOICE_GRADES` + `_GRADE_RANK` (both in `voice_grades.py`); ungraded voices get a sentinel rank that sorts last
 - `_filter_voices_by_gender` — narrows a voice list to one gender (`"f"` or `"m"`), or returns unchanged for `None` (no filter)
 - `_gender_code_from_checkboxes` — maps Female/Male checkbox state to a gender code: both checked or both unchecked → `None` (no filter); only Female → `"f"`; only Male → `"m"`
 - `_split_voices_for_display` — splits a voice list into `(visible, hidden)` — top N (default 6) visible, rest hidden. If a selected voice would land in the tail, pins it into the visible section.
-- `_cache_key` — builds the session-state key for a generated audio: `f"audio:{voice}:{lang_code}:{speed}:{hash(text)}"`. Cache invalidates implicitly when any of voice/text/speed/lang changes.
-- `render_voice_card` — renders one bordered card per voice: title via `_format_voice`, a 50/50 inner row with a speed selectbox on the left and a Play button on the right, and an `st.audio` player below when audio for `_cache_key(...)` is in session state. Play click runs `generate_one` and stores the result.
+- `_text_digest` — stable 16-hex-char `hashlib.sha1` digest of the text; used in cache keys so they are reproducible across processes (unlike the previously used `hash()`, which is per-process randomized)
+- `_cache_key` — builds the session-state key for a generated audio: `f"audio:{voice}:{lang_code}:{speed}:{_text_digest(text)}"`. Cache invalidates implicitly when any of voice/text/speed/lang changes.
+- `_next_audio_seq` — returns a monotonically increasing counter from `st.session_state["_audio_seq"]`, stamped onto each `VoiceResult` at write time so cache ordering never relies on `st.session_state` iteration order (which is a hash-ordered set in real Streamlit, not insertion order)
+- `_find_stale_cached_audio` — returns the most recently generated cached audio for a `(voice, text, lang)` regardless of speed (highest `seq`), used to show a 🔊 badge and a stale-preview player when the current speed has no cached audio
+- `_evict_old_audio` — caps the session-state audio cache at `AUDIO_CACHE_LIMIT` (20) by deleting the lowest-`seq` (oldest-generated) entries; ordering comes from `seq`, not iteration order
+- `_audio_to_wav_bytes` — encodes a float32 audio array to WAV bytes via `soundfile` for the per-card download button
+- `render_voice_card` — `@st.fragment`-wrapped; renders one bordered card per voice so a Play/speed interaction reruns only that card, not the whole script. Title via `_format_voice` (prefixed with 🔊 when cached audio exists), a 50/50 inner row with a speed selectbox (left) and Play button (right), then an `st.audio` player and Download button when audio for `_cache_key(...)` is in session state, or a stale-preview player + "Click Play to refresh (speed changed)" caption when only another speed is cached. Play click runs `generate_one`, stamps `seq`, stores the result, and calls `_evict_old_audio`.
+- `_render_persistent_phonemes` — re-renders the `Phoneme Tokens` expander (open) when `last_phonemes` matches the current `(text, lang_code)`, so tokenized phonemes persist across reruns
 - `render_phonemes` — renders the `Phoneme Tokens` expander with `st.code`; `expanded` flag toggles open state
 - `_estimate_phonemes` — cheap char-count × per-language multiplier (English 0.85, Romance/Portuguese 0.90, Hindi/Italian 1.00, Japanese 1.40, Mandarin 2.00); used by the length caption when no tokenization has run yet
 - `_phoneme_band` — returns `(color, label)` for a phoneme count: `<20` red "very short", `20–99` orange "short", `100–399` green "ideal", `400–509` orange "long", `≥510` red "will be chunked"
@@ -102,10 +111,13 @@ On first launch, `ensure_repo_downloaded` calls `huggingface_hub.snapshot_downlo
 - `load_pipeline()` is deferred until the first per-card Play click, so initial page render is not blocked by model load
 - `generate_speech` uses `np.asarray(..., dtype=np.float32)` to avoid copying chunks that are already float32
 - Per-card audio results are stored in `st.session_state` keyed by `_cache_key`, so re-renders triggered by other interactions don't regenerate audio
+- `render_voice_card` is an `@st.fragment`, so a Play click or speed change reruns only that card instead of re-executing the whole script (each card opens its own `st.container`, giving it an independent fragment instance). One accepted trade-off: a sibling card's 🔊 badge refreshes on the next full rerun, not instantly.
+- The session-state audio cache is bounded at `AUDIO_CACHE_LIMIT` (20) via `_evict_old_audio`; eviction (oldest-generated first) and stale-preview selection (newest first) both order by the stored `seq`, never by `st.session_state` iteration order
 
 ### UI
 
 **Layout (top to bottom):**
+0. `st.set_page_config(layout="wide", page_title="Kokoro Studio", page_icon="🎙️")` (first command), then the `st.title("Kokoro Studio")` heading
 1. Full-width `Language` selectbox at the top (hidden label)
 2. Two-column split: input panel (left) + controls and voice cards (right). Generated audio renders inline inside each card — no separate output row.
 
@@ -122,24 +134,24 @@ On first launch, `ensure_repo_downloaded` calls `huggingface_hub.snapshot_downlo
 - Voice cards rendered via `render_voice_card`. Top 6 voices (by grade, via `_split_voices_for_display`) visible directly; the rest sit behind an `st.expander("Show All Voices")`
 - When no voices match the gender filter, `st.info("No voices match this filter.")` renders in place
 
-**Voice card (per voice, via `render_voice_card`):**
-- `st.container(border=True)` frame
-- Bold title via `_format_voice` (e.g. `**Heart (female) — A**`)
+**Voice card (per voice, via `render_voice_card`, `@st.fragment`):**
+- `st.container(border=True)` frame (created inside the function, so each card is its own fragment instance — never pass a pre-built container in)
+- Bold title via `_format_voice` (e.g. `**Heart (female) — A**`), prefixed with `🔊 ` when `_find_stale_cached_audio` finds any cached audio for this voice/text/lang
 - 50/50 inner row via `st.columns([1, 1])`: speed selectbox on the left, Play button on the right
 - Speed selectbox: `SPEED_OPTIONS` (`[0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]`), default `1.0`, formatted as `"{x}x"` (e.g. `1.0x`), keyed `f"speed_{voice}"`, label hidden
-- Play button: `▶ Play`, `type="primary"`, `use_container_width=True`, keyed `f"play_{voice}"`, `disabled=not text.strip()`. Click handler loads the model (cached), runs `generate_one`, and stores the result in `st.session_state[_cache_key(voice, text, speed, lang_code)]`
-- An `st.audio` player embeds inline below the row when that cache key is present in session state — multiple voices' audios coexist for A/B comparison on the same text
+- Play button: `▶ Play`, `type="primary"`, `width="stretch"`, keyed `f"play_{voice}"`, `disabled=not text.strip()`. Click handler loads the model (cached), runs `generate_one`, stamps `seq` via `_next_audio_seq`, stores the result in `st.session_state[_cache_key(voice, text, speed, lang_code)]`, then calls `_evict_old_audio`
+- When the current speed's cache key is present: an inline `st.audio` player plus a Download button (`f"download_{voice}"`, WAV via `_audio_to_wav_bytes`). Multiple voices' audios coexist for A/B comparison on the same text. When only another speed is cached: a "Click Play to refresh (speed changed)" caption above a stale-preview `st.audio` player (no download)
 
 **Audio cache lifecycle:**
-- Cache key includes voice, text, speed, lang_code — changing any creates a new key, so the audio player disappears until Play is clicked again (correct: different inputs → different audio)
+- Cache key includes voice, text, speed, lang_code (text via `_text_digest`) — changing any creates a new key, so the current-speed player disappears until Play is clicked again; a stale-preview player for a previously generated speed may still show via `_find_stale_cached_audio`
 - Cached audios persist across reruns triggered by other interactions
-- No explicit eviction — the cache grows with each (voice, text, speed, lang) tuple played, which is fine for typical sessions
+- Each result carries a monotonic `seq`; `_evict_old_audio` caps the cache at `AUDIO_CACHE_LIMIT` (20), evicting the lowest-`seq` (oldest-generated) entries. Both eviction and stale-preview selection order by `seq`, never by `st.session_state` iteration order (a hash-ordered set at runtime)
 
 **Behavior:**
-- On initial render, `ensure_repo_downloaded` may show an `st.spinner` for the one-time model + voices download when the local HuggingFace cache is incomplete; otherwise no spinner appears
+- On initial render, `ensure_repo_downloaded` may show an `st.spinner` (`~355 MB`) for the one-time model + voices download when the local HuggingFace cache is incomplete; otherwise no spinner appears
 - If the first-launch download fails (e.g. offline with no cache), the script shows `st.error(...)` and halts via `st.stop()` instead of leaking a Python traceback
 - Chunk-by-chunk generation progress appears via `st.status` inside the active card during the Play-triggered run
-- Per-card errors surface via `st.exception()` inside the card; other cards remain functional
+- Expected/user-actionable per-card failures (`ValueError`, e.g. "No audio generated") surface as a clean `st.error(str(e))`; only genuinely unexpected errors fall through to `st.exception()`. Either way other cards remain functional
 
 ## Resources
 
