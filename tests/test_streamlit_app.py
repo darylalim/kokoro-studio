@@ -372,6 +372,18 @@ class TestGenerateOne:
             text="hi", voice="af_heart", speed=1.5, lang_code="b"
         )
 
+    def test_raises_on_empty_chunks(self) -> None:
+        # Locks the end-to-end "No audio generated" propagation that the card's
+        # ValueError -> st.error branch depends on (match pins the exact message,
+        # so a refactor letting np.concatenate([]) raise instead would fail).
+        self._mock_tokenizer()
+        model = MagicMock()
+        chunk = MagicMock()
+        chunk.audio = None
+        model.generate.return_value = [chunk]
+        with pytest.raises(ValueError, match="No audio generated"):
+            generate_one("hi", "af_heart", model, 1.0, "a")
+
 
 class TestSplitVoicesForDisplay:
     LONG = [f"af_v{i}" for i in range(10)]  # 10 voices
@@ -580,6 +592,19 @@ class TestEvictOldAudio:
         assert "audio:v0:a:1.0:0" in st.session_state  # highest seq survives
         self._clear_audio_cache()
 
+    def test_protected_key_survives_even_when_lowest_seq(self) -> None:
+        # A key a card is currently displaying (passed in `protect`) is never
+        # evicted, even if it is the oldest — guards the fragment scenario where
+        # one card's Play would otherwise orphan a sibling's on-screen player.
+        self._clear_audio_cache()
+        self._fill_cache(AUDIO_CACHE_LIMIT + 1)
+        oldest = "audio:v0:a:1.0:0"  # seq=0, the normal eviction victim
+        _evict_old_audio(protect=frozenset({oldest}))
+        assert self._count_audio_keys() == AUDIO_CACHE_LIMIT
+        assert oldest in st.session_state  # protected despite being oldest
+        assert "audio:v1:a:1.0:1" not in st.session_state  # next-oldest evicted
+        self._clear_audio_cache()
+
     def test_preserves_non_audio_session_keys(self) -> None:
         self._clear_audio_cache()
         st.session_state["language"] = "American English"
@@ -648,43 +673,48 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
 
     def test_returns_most_recent_when_multiple_speeds_cached(self) -> None:
+        # Insert the higher-seq (most-recent) entry FIRST so insertion order
+        # disagrees with seq order — this fails the old matches[-1] impl, which
+        # would return the last-inserted (lower-seq) entry instead.
         self._clear_audio_cache()
         key_07 = _cache_key("af_heart", "hello", 0.7, "a")
         key_15 = _cache_key("af_heart", "hello", 1.5, "a")
-        st.session_state[key_07] = {
-            "audio": np.zeros(10, dtype=np.float32),
-            "voice": "af_heart",
-            "phonemes": "x",
-            "seq": 1,
-        }
         st.session_state[key_15] = {
             "audio": np.ones(10, dtype=np.float32),
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 2,
+        }
+        st.session_state[key_07] = {
+            "audio": np.zeros(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
         assert result is not None
-        assert result["audio"][0] == 1.0
+        assert result["audio"][0] == 1.0  # higher-seq 1.5 entry, not last-inserted
         self._clear_audio_cache()
 
     def test_returns_highest_seq_regardless_of_insertion_order(self) -> None:
-        # Recency must come from seq, not st.session_state iteration order:
-        # insert the 1.5 entry first but mark 0.7 as generated more recently.
+        # Recency must come from seq, not st.session_state iteration order. The
+        # mock session_state is a plain (insertion-ordered) dict, so insert the
+        # higher-seq entry FIRST: the buggy matches[-1] then returns the
+        # last-inserted lower-seq entry (0.0) and this assertion fails.
         self._clear_audio_cache()
         key_07 = _cache_key("af_heart", "hello", 0.7, "a")
         key_15 = _cache_key("af_heart", "hello", 1.5, "a")
-        st.session_state[key_15] = {
-            "audio": np.zeros(10, dtype=np.float32),
-            "voice": "af_heart",
-            "phonemes": "x",
-            "seq": 1,
-        }
         st.session_state[key_07] = {
             "audio": np.ones(10, dtype=np.float32),
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 2,
+        }
+        st.session_state[key_15] = {
+            "audio": np.zeros(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
         assert result is not None
@@ -975,6 +1005,24 @@ class TestRenderVoiceCard:
         st.exception.assert_not_called()  # ty: ignore[unresolved-attribute]
         expected_key = _cache_key("af_heart", "hello", 1.0, "a")
         assert expected_key not in st.session_state
+
+    def test_click_unexpected_valueerror_uses_exception(self) -> None:
+        # A ValueError that is NOT the benign "no audio" case keeps the
+        # developer-facing st.exception, not a bare st.error.
+        self._reset_mocks()
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        st.error.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.exception.reset_mock()  # ty: ignore[unresolved-attribute]
+        with (
+            patch("streamlit_app.load_pipeline"),
+            patch(
+                "streamlit_app.generate_one",
+                side_effect=ValueError("some cryptic internal failure"),
+            ),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+        st.exception.assert_called_once()  # ty: ignore[unresolved-attribute]
+        st.error.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_click_triggers_eviction(self) -> None:
         self._reset_mocks()

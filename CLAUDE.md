@@ -43,7 +43,7 @@ uv run streamlit run streamlit_app.py
 
 `pyproject.toml` — project metadata, dependencies, dependency groups, ruff isort (`combine-as-imports`), pytest (`pythonpath`, `testpaths`), ty (`python-version = "3.12"`).
 
-`.streamlit/config.toml` — `[server] fileWatcherType = "none"` plus the "Kokoro indigo" theme: indigo `primaryColor` (`#6366F1`), `8px` radius, Inter / JetBrains Mono fonts, and `[theme.light]`/`[theme.dark]` blocks defining both modes (with red/orange/green tuned to match the utterance-length caption bands). The app calls `st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")` as its first Streamlit command.
+`.streamlit/config.toml` — `[server] fileWatcherType = "none"` plus the "Kokoro indigo" theme: indigo `primaryColor` (`#4F46E5`, AA-contrast with white button text), `8px` radius, Inter / JetBrains Mono fonts, and `[theme.light]`/`[theme.dark]` blocks defining both modes (with red/orange/green tuned to match the utterance-length caption bands). The app calls `st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")` as its first Streamlit command.
 
 ## Architecture
 
@@ -77,7 +77,7 @@ uv run streamlit run streamlit_app.py
 - `_cache_key` — builds the session-state key for a generated audio: `f"audio:{voice}:{lang_code}:{speed}:{_text_digest(text)}"`. Cache invalidates implicitly when any of voice/text/speed/lang changes.
 - `_next_audio_seq` — returns a monotonically increasing counter from `st.session_state["_audio_seq"]`, stamped onto each `VoiceResult` at write time so cache ordering never relies on `st.session_state` iteration order (which is a hash-ordered set in real Streamlit, not insertion order)
 - `_find_stale_cached_audio` — returns the most recently generated cached audio for a `(voice, text, lang)` regardless of speed (highest `seq`), used to show a 🔊 badge and a stale-preview player when the current speed has no cached audio
-- `_evict_old_audio` — caps the session-state audio cache at `AUDIO_CACHE_LIMIT` (20) by deleting the lowest-`seq` (oldest-generated) entries; ordering comes from `seq`, not iteration order
+- `_evict_old_audio` — caps the session-state audio cache at `AUDIO_CACHE_LIMIT` (20) by deleting the lowest-`seq` (oldest-generated) entries; ordering comes from `seq`, not iteration order. Takes an optional `protect` set of keys never to evict — the render loop stores every on-screen card's current-speed key in `st.session_state["_displayed_audio_keys"]`, and the Play handler passes those (plus the just-written key) so a fragment's eviction can't orphan a sibling card's visible player
 - `_audio_to_wav_bytes` — encodes a float32 audio array to WAV bytes via `soundfile` for the per-card download button
 - `render_voice_card` — `@st.fragment`-wrapped; renders one bordered card per voice so a Play/speed interaction reruns only that card, not the whole script. Title via `_format_voice` (prefixed with 🔊 when cached audio exists), a 50/50 inner row with a speed selectbox (left) and Play button (right), then an `st.audio` player and Download button when audio for `_cache_key(...)` is in session state, or a stale-preview player + "Click Play to refresh (speed changed)" caption when only another speed is cached. Play click runs `generate_one`, stamps `seq`, stores the result, and calls `_evict_old_audio`.
 - `_render_persistent_phonemes` — re-renders the `Phoneme Tokens` expander (open) when `last_phonemes` matches the current `(text, lang_code)`, so tokenized phonemes persist across reruns

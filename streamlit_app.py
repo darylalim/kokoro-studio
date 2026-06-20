@@ -313,16 +313,20 @@ def _find_stale_cached_audio(
     return max(matches, key=lambda r: r.get("seq", 0))
 
 
-def _evict_old_audio() -> None:
+def _evict_old_audio(protect: frozenset[str] = frozenset()) -> None:
     audio_keys = [
         k for k in st.session_state if isinstance(k, str) and k.startswith("audio:")
     ]
     overflow = len(audio_keys) - AUDIO_CACHE_LIMIT
     if overflow <= 0:
         return
+    # `protect` shields keys a card is currently displaying: render_voice_card is
+    # an @st.fragment, so a Play in one card reruns only that card — evicting a
+    # sibling's key here would orphan its still-visible player until a full rerun.
+    candidates = [k for k in audio_keys if k not in protect]
     # Drop the oldest by generation order (lowest seq); never trust iteration order.
-    audio_keys.sort(key=lambda k: st.session_state[k].get("seq", 0))
-    for k in audio_keys[:overflow]:
+    candidates.sort(key=lambda k: st.session_state[k].get("seq", 0))
+    for k in candidates[:overflow]:
         del st.session_state[k]
 
 
@@ -400,9 +404,15 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 result = generate_one(text, voice, pipeline, card_speed, lang_code)
                 result["seq"] = _next_audio_seq()
                 st.session_state[key] = result
-                _evict_old_audio()
+                protect = frozenset(st.session_state.get("_displayed_audio_keys", ()))
+                _evict_old_audio(protect | {key})
             except ValueError as e:
-                st.error(str(e))
+                # Only the benign "no audio" case gets a friendly message;
+                # unexpected ValueErrors keep the developer-facing traceback.
+                if "No audio generated" in str(e):
+                    st.error(str(e))
+                else:
+                    st.exception(e)
             except Exception as e:
                 st.exception(e)
         if key in st.session_state:
@@ -497,6 +507,18 @@ with controls_col:
     voices = _filter_voices_by_gender(get_voices(lang_code), gender_code)
     if voices:
         visible, hidden = _split_voices_for_display(voices, None)
+        # Record each on-screen card's current-speed cache key so a fragment's
+        # Play-triggered eviction never deletes audio another card is showing.
+        default_speed = SPEED_OPTIONS[DEFAULT_SPEED_INDEX]
+        st.session_state["_displayed_audio_keys"] = {
+            _cache_key(
+                v,
+                text_input,
+                st.session_state.get(f"speed_{v}", default_speed),
+                lang_code,
+            )
+            for v in visible + hidden
+        }
         for voice in visible:
             render_voice_card(voice, text_input, lang_code)
         if hidden:

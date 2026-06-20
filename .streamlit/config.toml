@@ -4,7 +4,8 @@ fileWatcherType = "none"
 # Kokoro Studio — "Kokoro indigo" theme. Shared values live in [theme]; the
 # light and dark blocks define both modes so the toolbar mode toggle is shown.
 [theme]
-primaryColor = "#6366F1"
+# indigo-600: white button text clears WCAG AA contrast (6.29:1)
+primaryColor = "#4F46E5"
 baseRadius = "8px"
 linkUnderline = false
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"

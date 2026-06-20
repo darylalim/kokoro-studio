@@ -111,9 +111,10 @@ class TestVoiceCards:
         for voice in ("af_heart", "af_bella", "am_adam"):
             assert at.selectbox(key=f"speed_{voice}").value == 1.0
 
-    def test_changing_card_speed_keeps_app_healthy(self) -> None:
-        # The per-card speed selectbox drives the @st.fragment-wrapped card; the
-        # app must rerun cleanly and reflect the new value.
+    def test_changing_card_speed_reruns_cleanly(self) -> None:
+        # The per-card speed selectbox must rerun the app cleanly and reflect the
+        # new value. (AppTest can't observe fragment-scoped reruns, so this
+        # asserts a healthy rerun, not the isolation itself.)
         at = _run_app()
         at.selectbox(key="speed_af_heart").select(1.5).run()
         assert not at.exception
