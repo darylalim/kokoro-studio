@@ -54,7 +54,7 @@ uv run streamlit run streamlit_app.py
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
 - `.streamlit/config.toml` — server config (`fileWatcherType = "none"`) plus the "Kokoro indigo" `[theme]` with `[theme.light]`/`[theme.dark]` blocks (so the toolbar mode toggle appears); the only `.streamlit/` file checked in (a `.gitignore` exception)
 - `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import; the `streamlit` mock provides identity-pass-through shims for `cache_resource`, `cache_data`, and `fragment` so decorated functions keep running their real bodies under test
-- `tests/test_streamlit_app.py` — unit tests
+- `tests/test_streamlit_app.py` — unit tests, including `seq`-ordered cache eviction/recency and `.streamlit/config.toml` theme validation
 - `tests_integration/conftest.py` — clears `streamlit`/`misaki`/`mlx_audio`/`huggingface_hub` from `sys.modules` so AppTest gets the real modules; incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
 - `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching, per-card speed controls
 

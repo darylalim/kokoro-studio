@@ -5,8 +5,9 @@ __pycache__/
 # Tools
 .pytest_cache/
 .ruff_cache/
+
+# Streamlit — ignore local cache/secrets, but ship the committed theme
 .streamlit/*
-# ...but ship the app theme + server config
 !.streamlit/config.toml
 
 # macOS
