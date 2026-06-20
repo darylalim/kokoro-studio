@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -1585,3 +1586,47 @@ class TestNextAudioSeq:
         assert _next_audio_seq() == 1
         assert _next_audio_seq() == 2
         assert _next_audio_seq() == 3
+
+
+class TestThemeConfig:
+    """Guard the shipped .streamlit/config.toml theme: a malformed file or a
+    missing mode block breaks app startup or the light/dark toggle."""
+
+    @staticmethod
+    def _load_theme() -> dict[str, Any]:
+        import tomllib
+
+        import streamlit_app
+
+        path = Path(streamlit_app.__file__).parent / ".streamlit" / "config.toml"
+        assert path.exists(), f"missing: {path}"
+        with path.open("rb") as f:
+            config = tomllib.load(f)
+        assert "theme" in config, "config.toml has no [theme] section"
+        return config["theme"]
+
+    def test_defines_primary_color(self) -> None:
+        theme = self._load_theme()
+        assert str(theme.get("primaryColor", "")).startswith("#")
+
+    def test_defines_both_light_and_dark_modes(self) -> None:
+        # Both blocks must exist for the toolbar light/dark toggle to appear.
+        theme = self._load_theme()
+        assert "light" in theme
+        assert "dark" in theme
+
+    def test_each_mode_defines_background_and_text(self) -> None:
+        theme = self._load_theme()
+        for mode in ("light", "dark"):
+            block = theme[mode]
+            assert str(block.get("backgroundColor", "")).startswith("#")
+            assert str(block.get("textColor", "")).startswith("#")
+
+    def test_each_mode_defines_caption_band_colors(self) -> None:
+        # _render_length_caption emits :red[]/:orange[]/:green[] text, so both
+        # modes must define those semantic colors.
+        theme = self._load_theme()
+        for mode in ("light", "dark"):
+            block = theme[mode]
+            for band in ("redColor", "orangeColor", "greenColor"):
+                assert band in block, f"{mode} mode missing {band}"
