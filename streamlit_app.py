@@ -418,6 +418,10 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 result = generate_one(text, voice, pipeline, card_speed, lang_code)
                 result["seq"] = _next_audio_seq()
                 st.session_state[key] = result
+                # The card now displays this just-generated take, so re-register
+                # it: the pre-Play registration above pointed at the prior
+                # displayed key (e.g. a stale preview at another speed).
+                st.session_state.setdefault("_displayed_card_keys", {})[voice] = key
                 protect = frozenset(
                     st.session_state.get("_displayed_card_keys", {}).values()
                 )
@@ -523,18 +527,20 @@ with controls_col:
         "Gender",
         options=["All", "Female", "Male"],
         default="All",
+        required=True,
         key="gender",
         label_visibility="collapsed",
     )
     gender_code = _gender_code_from_selection(gender_selection)
     voices = _filter_voices_by_gender(get_voices(lang_code), gender_code)
+    # Reset the protect map on every full rerun — even when the filter empties the
+    # list — so voices dropped by a filter or language change don't linger. Each
+    # card's fragment re-populates its own entry with the key it is displaying (see
+    # render_voice_card); both the visible loop and the always-executed expander
+    # body run on every full rerun.
+    st.session_state["_displayed_card_keys"] = {}
     if voices:
         visible, hidden = _split_voices_for_display(voices, None)
-        # Reset the protect map on every full rerun so voices dropped by a filter
-        # or language change don't linger. Each card's fragment re-populates its own
-        # entry with the key it is displaying (see render_voice_card) — both the
-        # visible loop and the always-executed expander body run every full rerun.
-        st.session_state["_displayed_card_keys"] = {}
         for voice in visible:
             render_voice_card(voice, text_input, lang_code)
         if hidden:

@@ -808,7 +808,9 @@ class TestRenderVoiceCard:
 
     def test_registers_current_key_as_displayed_when_cached(self) -> None:
         # When the current-speed take exists it is what's on screen, so it is the
-        # key protected from a sibling fragment's eviction.
+        # key protected — even when a NEWER take exists at another speed (which
+        # _stale_cached_key would otherwise prefer by seq). This discriminates the
+        # `key if key in st.session_state` branch from a buggy `stale_key or key`.
         self._reset_mocks()
         st.session_state.pop("_displayed_card_keys", None)
         current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
@@ -818,9 +820,17 @@ class TestRenderVoiceCard:
             "phonemes": "x",
             "seq": 1,
         }
+        newer_other_speed = _cache_key("af_heart", "hello", 0.7, "a")
+        st.session_state[newer_other_speed] = {
+            "audio": np.ones(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 2,  # higher seq than the current-speed take
+        }
         render_voice_card("af_heart", "hello", "a")
         assert st.session_state["_displayed_card_keys"]["af_heart"] == current
         del st.session_state[current]
+        del st.session_state[newer_other_speed]
 
     def test_registers_stale_key_as_displayed_when_only_other_speed_cached(
         self,
@@ -1064,9 +1074,14 @@ class TestRenderVoiceCard:
         st.exception.assert_called_once()  # ty: ignore[unresolved-attribute]
         st.error.assert_not_called()  # ty: ignore[unresolved-attribute]
 
-    def test_click_triggers_eviction(self) -> None:
+    def test_click_forwards_displayed_keys_to_eviction(self) -> None:
+        # The Play handler must forward every on-screen card's displayed key (plus
+        # the just-written key) to _evict_old_audio, or a sibling's visible audio
+        # could be orphaned. Guards the registration->eviction seam directly.
         self._reset_mocks()
         st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        sibling_key = _cache_key("af_bella", "hello", 0.7, "a")
+        st.session_state["_displayed_card_keys"] = {"af_bella": sibling_key}
         fake_result = {
             "audio": np.ones(50, dtype=np.float32),
             "voice": "af_heart",
@@ -1079,8 +1094,42 @@ class TestRenderVoiceCard:
         ):
             render_voice_card("af_heart", "hello", "a")
         mock_evict.assert_called_once()
+        protect = mock_evict.call_args[0][0]
         expected_key = _cache_key("af_heart", "hello", 1.0, "a")
+        assert sibling_key in protect  # other on-screen card's key is shielded
+        assert expected_key in protect  # the just-written take is shielded
         del st.session_state[expected_key]
+
+    def test_play_reregisters_new_take_as_displayed(self) -> None:
+        # Regression: after Play generates a new take over a stale preview, the
+        # protect map must point at the NEW key (what the card now shows), not the
+        # pre-Play stale key registered at render time — else a sibling's eviction
+        # could orphan the freshly generated take.
+        self._reset_mocks()
+        st.session_state.pop("_displayed_card_keys", None)
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        stale = _cache_key("af_heart", "hello", 0.7, "a")  # prior take, other speed
+        st.session_state[stale] = {
+            "audio": np.ones(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
+        }
+        current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
+        fake_result = {
+            "audio": np.ones(50, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+        }
+        with (
+            patch("streamlit_app.load_pipeline"),
+            patch("streamlit_app.generate_one", return_value=fake_result),
+            patch("streamlit_app._evict_old_audio"),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+        assert st.session_state["_displayed_card_keys"]["af_heart"] == current
+        del st.session_state[stale]
+        del st.session_state[current]
 
     def test_no_stale_audio_when_text_differs(self) -> None:
         self._reset_mocks()
