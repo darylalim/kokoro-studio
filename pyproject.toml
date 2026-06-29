@@ -1,7 +1,7 @@
 [project]
 name = "kokoro-studio"
 version = "0.14.0"
-description = "Generate multilingual speech with the Hexgrad Kokoro model on Apple Silicon with MLX."
+description = "Streamlit application for generating multilingual speech using Hexgrad Kokoro on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
     "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
