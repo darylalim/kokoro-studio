@@ -27,10 +27,9 @@ class TestInitialRender:
         assert at.title[0].value == "Kokoro Studio"
         assert at.selectbox(key="language").value == "American English"
 
-    def test_gender_checkboxes_start_unchecked(self) -> None:
+    def test_gender_filter_defaults_to_all(self) -> None:
         at = _run_app()
-        assert at.checkbox(key="female").value is False
-        assert at.checkbox(key="male").value is False
+        assert at.segmented_control(key="gender").value == "All"
 
     def test_tokenize_disabled_when_text_empty(self) -> None:
         at = _run_app()
@@ -39,7 +38,7 @@ class TestInitialRender:
 
     def test_play_buttons_disabled_when_text_empty(self) -> None:
         at = _run_app()
-        play_buttons = [b for b in at.button if b.label == "▶ Play"]
+        play_buttons = [b for b in at.button if b.label == "Play"]
         assert play_buttons
         assert all(b.disabled for b in play_buttons)
 
@@ -58,7 +57,7 @@ class TestTextInputEnablesActions:
     def test_typing_text_enables_play_buttons(self) -> None:
         at = _run_app()
         at.text_area[0].input("hello world").run()
-        play_buttons = [b for b in at.button if b.label == "▶ Play"]
+        play_buttons = [b for b in at.button if b.label == "Play"]
         assert play_buttons
         assert not any(b.disabled for b in play_buttons)
 
@@ -81,14 +80,14 @@ class TestTokenizeFlow:
 class TestGenderFilter:
     def test_female_filter_shows_only_female_voices(self) -> None:
         at = _run_app()
-        at.checkbox(key="female").check().run()
+        at.segmented_control(key="gender").set_value("Female").run()
         titles = _voice_titles(at)
         assert titles
         assert all("(female)" in t for t in titles)
 
     def test_male_filter_shows_only_male_voices(self) -> None:
         at = _run_app()
-        at.checkbox(key="male").check().run()
+        at.segmented_control(key="gender").set_value("Male").run()
         titles = _voice_titles(at)
         assert titles
         assert all("(male)" in t for t in titles)
@@ -123,6 +122,6 @@ class TestVoiceCards:
     def test_play_buttons_enabled_after_typing(self) -> None:
         at = _run_app()
         at.text_area[0].input("hello world").run()
-        play_buttons = [b for b in at.button if b.label == "▶ Play"]
+        play_buttons = [b for b in at.button if b.label == "Play"]
         assert len(play_buttons) >= 3  # one per visible American English voice
         assert not any(b.disabled for b in play_buttons)

@@ -8,7 +8,11 @@ fileWatcherType = "none"
 primaryColor = "#4F46E5"
 baseRadius = "8px"
 linkUnderline = false
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+# h1 (the page title) extrabold at 800 — heavier than Streamlit's 700 default — for
+# a more distinct title; h2–h6 keep the 600 default. Headings already use the body
+# Inter, so no separate headingFont is needed.
+headingFontWeights = [800, 600, 600, 600, 600, 600]
 codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
 
 [theme.light]

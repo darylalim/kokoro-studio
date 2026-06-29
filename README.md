@@ -7,10 +7,10 @@ Generate multilingual speech with the [Hexgrad Kokoro model](https://huggingface
 - 9 supported languages (American English, British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin Chinese)
 - One-time model + voice download on first launch (~355 MB); fully offline thereafter
 - Per-language sample text buttons (🎲 Random Quote + two literary excerpts) to seed the textarea with public-domain reference text
-- Voice cards sorted by quality grade (best first), with grade in each title (e.g. "Heart (female) — A"); top 6 visible, rest behind a "Show All Voices" expander
-- Gender filter via Female / Male checkboxes; either alone filters, neither or both shows all
+- Voice cards sorted by quality grade (best first), with grade in each title (e.g. "Heart (female) — A"); top 6 visible, rest behind a "Show all voices" expander
+- Gender filter via a single segmented control (All / Female / Male), defaulting to All
 - Per-card Play button generates audio on demand and embeds an audio player inline — A/B-compare multiple voices on the same text. Each card reruns on its own (`st.fragment`), so playing one voice or changing its speed never reloads the whole page
-- Per-card speed dropdown (0.7x–1.5x in 0.1 steps); a 🔊 badge marks voices with cached audio, and switching speed shows the previous take until you re-play
+- Per-card speed dropdown (0.7x–1.5x in 0.1 steps); a speaker icon marks voices with cached audio, and switching speed shows the previous take until you re-play
 - Per-card Download button for the generated WAV
 - Light and dark themes with a toolbar toggle
 - Chunk-by-chunk generation progress via `st.status` inside the active card

@@ -25,7 +25,7 @@ from streamlit_app import (
     _filter_voices_by_gender,
     _find_stale_cached_audio,
     _format_voice,
-    _gender_code_from_checkboxes,
+    _gender_code_from_selection,
     _load_sample,
     _next_audio_seq,
     _phoneme_band,
@@ -608,11 +608,11 @@ class TestEvictOldAudio:
     def test_preserves_non_audio_session_keys(self) -> None:
         self._clear_audio_cache()
         st.session_state["language"] = "American English"
-        st.session_state["female"] = False
+        st.session_state["gender"] = "All"
         self._fill_cache(AUDIO_CACHE_LIMIT + 1)
         _evict_old_audio()
         assert st.session_state["language"] == "American English"
-        assert st.session_state["female"] is False
+        assert st.session_state["gender"] == "All"
         self._clear_audio_cache()
 
 
@@ -755,7 +755,9 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # ty: ignore[unresolved-attribute]
+        st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+            ":material/volume_up: **Heart (female) — A**"
+        )
 
     def test_badge_when_cached_at_other_speed(self) -> None:
         self._reset_mocks()
@@ -765,7 +767,9 @@ class TestRenderVoiceCard:
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**🔊 Heart (female) — A**")  # ty: ignore[unresolved-attribute]
+        st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+            ":material/volume_up: **Heart (female) — A**"
+        )
 
     def test_no_badge_when_cache_for_different_text(self) -> None:
         self._reset_mocks()
@@ -800,7 +804,43 @@ class TestRenderVoiceCard:
     def test_play_button_label(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        assert st.button.call_args[0][0] == "▶ Play"  # ty: ignore[unresolved-attribute]
+        assert st.button.call_args[0][0] == "Play"  # ty: ignore[unresolved-attribute]
+
+    def test_registers_current_key_as_displayed_when_cached(self) -> None:
+        # When the current-speed take exists it is what's on screen, so it is the
+        # key protected from a sibling fragment's eviction.
+        self._reset_mocks()
+        st.session_state.pop("_displayed_card_keys", None)
+        current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
+        st.session_state[current] = {
+            "audio": np.ones(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
+        }
+        render_voice_card("af_heart", "hello", "a")
+        assert st.session_state["_displayed_card_keys"]["af_heart"] == current
+        del st.session_state[current]
+
+    def test_registers_stale_key_as_displayed_when_only_other_speed_cached(
+        self,
+    ) -> None:
+        # Regression: when only another speed is cached, the card shows that
+        # stale-preview audio — so the protect map must register the STALE key, not
+        # the (uncached) current-speed key, or a sibling's Play could evict the
+        # audio this card is actively displaying.
+        self._reset_mocks()
+        st.session_state.pop("_displayed_card_keys", None)
+        stale = _cache_key("af_heart", "hello", 0.7, "a")  # not the current 1.0
+        st.session_state[stale] = {
+            "audio": np.ones(10, dtype=np.float32),
+            "voice": "af_heart",
+            "phonemes": "x",
+            "seq": 1,
+        }
+        render_voice_card("af_heart", "hello", "a")
+        assert st.session_state["_displayed_card_keys"]["af_heart"] == stale
+        del st.session_state[stale]
 
     def test_play_disabled_when_text_empty(self) -> None:
         self._reset_mocks()
@@ -1160,21 +1200,21 @@ class TestFormatVoice:
         assert _format_voice(voice) == expected
 
 
-class TestGenderCodeFromCheckboxes:
+class TestGenderCodeFromSelection:
     @pytest.mark.parametrize(
-        ("female", "male", "expected"),
+        ("selected", "expected"),
         [
-            (True, True, None),
-            (False, False, None),
-            (True, False, "f"),
-            (False, True, "m"),
+            ("All", None),
+            (None, None),
+            ("Female", "f"),
+            ("Male", "m"),
         ],
-        ids=["both-checked", "neither-checked", "only-female", "only-male"],
+        ids=["all", "none", "female", "male"],
     )
-    def test_gender_code_from_checkboxes(
-        self, female: bool, male: bool, expected: str | None
+    def test_gender_code_from_selection(
+        self, selected: str | None, expected: str | None
     ) -> None:
-        assert _gender_code_from_checkboxes(female, male) == expected
+        assert _gender_code_from_selection(selected) == expected
 
 
 class TestFilterVoicesByGender:

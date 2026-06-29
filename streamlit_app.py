@@ -199,10 +199,9 @@ def _filter_voices_by_gender(voices: list[str], gender_code: str | None) -> list
     return [v for v in voices if v[1] == gender_code]
 
 
-def _gender_code_from_checkboxes(female: bool, male: bool) -> str | None:
-    if female == male:
-        return None
-    return "f" if female else "m"
+def _gender_code_from_selection(selected: str | None) -> str | None:
+    # "All" (or no selection) → no filter; otherwise map the chosen gender.
+    return {"Female": "f", "Male": "m"}.get(selected or "")
 
 
 def _split_voices_for_display(
@@ -299,18 +298,24 @@ def _next_audio_seq() -> int:
 def _find_stale_cached_audio(
     voice: str, text: str, lang_code: str
 ) -> VoiceResult | None:
+    key = _stale_cached_key(voice, text, lang_code)
+    return st.session_state[key] if key is not None else None
+
+
+def _stale_cached_key(voice: str, text: str, lang_code: str) -> str | None:
+    # Most-recently-generated cache key for this (voice, text, lang) at ANY speed.
+    # st.session_state iterates a hash-ordered set, not insertion order, so recency
+    # must come from the stored seq, not position.
     prefix = f"audio:{voice}:{lang_code}:"
     suffix = f":{_text_digest(text)}"
-    matches = [
-        st.session_state[k]
+    keys = [
+        k
         for k in st.session_state
         if isinstance(k, str) and k.startswith(prefix) and k.endswith(suffix)
     ]
-    if not matches:
+    if not keys:
         return None
-    # Most recently generated wins. st.session_state iterates a hash-ordered set,
-    # not insertion order, so recency must come from the stored seq, not position.
-    return max(matches, key=lambda r: r.get("seq", 0))
+    return max(keys, key=lambda k: st.session_state[k].get("seq", 0))
 
 
 def _evict_old_audio(protect: frozenset[str] = frozenset()) -> None:
@@ -376,9 +381,10 @@ def generate_one(
 @st.fragment
 def render_voice_card(voice: str, text: str, lang_code: str) -> None:
     with st.container(border=True):
-        cached = _find_stale_cached_audio(voice, text, lang_code)
-        indicator = "🔊 " if cached is not None else ""
-        st.markdown(f"**{indicator}{_format_voice(voice)}**")
+        stale_key = _stale_cached_key(voice, text, lang_code)
+        cached = st.session_state[stale_key] if stale_key is not None else None
+        indicator = ":material/volume_up: " if cached is not None else ""
+        st.markdown(f"{indicator}**{_format_voice(voice)}**")
         speed_col, play_col = st.columns([1, 1])
         with speed_col:
             card_speed = st.selectbox(
@@ -391,20 +397,30 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
             )
         with play_col:
             play_clicked = st.button(
-                "▶ Play",
+                "Play",
+                icon=":material/play_arrow:",
                 key=f"play_{voice}",
                 type="primary",
                 width="stretch",
                 disabled=not text.strip(),
             )
         key = _cache_key(voice, text, card_speed, lang_code)
+        # Register the key whose audio this card is actually showing so a Play in
+        # any other fragment never evicts it: the current-speed take when it exists,
+        # otherwise the stale-preview key rendered below (a different speed). Each
+        # fragment rewrites its own entry every rerun, so the protect set self-heals
+        # against per-card speed changes the main body can't observe.
+        displayed_key = key if key in st.session_state else (stale_key or key)
+        st.session_state.setdefault("_displayed_card_keys", {})[voice] = displayed_key
         if play_clicked:
             try:
                 pipeline = load_pipeline()
                 result = generate_one(text, voice, pipeline, card_speed, lang_code)
                 result["seq"] = _next_audio_seq()
                 st.session_state[key] = result
-                protect = frozenset(st.session_state.get("_displayed_audio_keys", ()))
+                protect = frozenset(
+                    st.session_state.get("_displayed_card_keys", {}).values()
+                )
                 _evict_old_audio(protect | {key})
             except ValueError as e:
                 # Only the benign "no audio" case gets a friendly message;
@@ -420,6 +436,7 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
             st.audio(audio, sample_rate=SAMPLE_RATE)
             st.download_button(
                 label="Download",
+                icon=":material/download:",
                 data=_audio_to_wav_bytes(audio),
                 file_name=f"{voice}_{card_speed}x.wav",
                 mime="audio/wav",
@@ -485,7 +502,11 @@ with input_col:
         label_visibility="collapsed",
     )
     _render_sample_buttons(lang_code)
-    tokenize_clicked = st.button("Tokenize", disabled=not text_input.strip())
+    tokenize_clicked = st.button(
+        "Tokenize",
+        icon=":material/graphic_eq:",
+        disabled=not text_input.strip(),
+    )
     if tokenize_clicked:
         st.session_state["last_phonemes"] = (
             text_input,
@@ -498,32 +519,27 @@ with input_col:
     st.markdown(PRONUNCIATION_TIPS)
 
 with controls_col:
-    gcol_f, gcol_m = st.columns(2)
-    with gcol_f:
-        female_checked = st.checkbox("Female", value=False, key="female")
-    with gcol_m:
-        male_checked = st.checkbox("Male", value=False, key="male")
-    gender_code = _gender_code_from_checkboxes(female_checked, male_checked)
+    gender_selection = st.segmented_control(
+        "Gender",
+        options=["All", "Female", "Male"],
+        default="All",
+        key="gender",
+        label_visibility="collapsed",
+    )
+    gender_code = _gender_code_from_selection(gender_selection)
     voices = _filter_voices_by_gender(get_voices(lang_code), gender_code)
     if voices:
         visible, hidden = _split_voices_for_display(voices, None)
-        # Record each on-screen card's current-speed cache key so a fragment's
-        # Play-triggered eviction never deletes audio another card is showing.
-        default_speed = SPEED_OPTIONS[DEFAULT_SPEED_INDEX]
-        st.session_state["_displayed_audio_keys"] = {
-            _cache_key(
-                v,
-                text_input,
-                st.session_state.get(f"speed_{v}", default_speed),
-                lang_code,
-            )
-            for v in visible + hidden
-        }
+        # Reset the protect map on every full rerun so voices dropped by a filter
+        # or language change don't linger. Each card's fragment re-populates its own
+        # entry with the key it is displaying (see render_voice_card) — both the
+        # visible loop and the always-executed expander body run every full rerun.
+        st.session_state["_displayed_card_keys"] = {}
         for voice in visible:
             render_voice_card(voice, text_input, lang_code)
         if hidden:
-            with st.expander("Show All Voices"):
+            with st.expander("Show all voices", icon=":material/library_music:"):
                 for voice in hidden:
                     render_voice_card(voice, text_input, lang_code)
     else:
-        st.info("No voices match this filter.")
+        st.caption("No voices match this filter.")
