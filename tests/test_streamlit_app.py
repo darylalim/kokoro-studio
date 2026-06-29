@@ -1718,3 +1718,50 @@ class TestThemeConfig:
             block = theme[mode]
             for band in ("redColor", "orangeColor", "greenColor"):
                 assert band in block, f"{mode} mode missing {band}"
+
+    def test_h1_heading_is_extrabold(self) -> None:
+        # Guard the deliberate refinement: h1 must be heavier than Streamlit's
+        # default heading weight (700) — a [700, ...] list would be a silent no-op —
+        # and the weight must actually be loaded in the body font to render.
+        theme = self._load_theme()
+        weights = theme.get("headingFontWeights")
+        assert isinstance(weights, list) and len(weights) == 6
+        assert weights[0] >= 800, "h1 should be extrabold, not the 700 default"
+        assert "800" in str(theme.get("font", "")), "body font must load weight 800"
+
+
+class TestProjectMetadata:
+    """Keep the project description consistent across pyproject.toml (the source
+    of truth), the README tagline, and the CLAUDE.md Project Overview."""
+
+    EXPECTED_DESCRIPTION: str = (
+        "Streamlit application for generating multilingual speech using "
+        "Hexgrad Kokoro on Apple Silicon with MLX."
+    )
+
+    @staticmethod
+    def _repo_root() -> Path:
+        import streamlit_app
+
+        return Path(streamlit_app.__file__).parent
+
+    def _pyproject_description(self) -> str:
+        import tomllib
+
+        path = self._repo_root() / "pyproject.toml"
+        with path.open("rb") as f:
+            return tomllib.load(f)["project"]["description"]
+
+    def test_pyproject_description(self) -> None:
+        assert self._pyproject_description() == self.EXPECTED_DESCRIPTION
+
+    @pytest.mark.parametrize("filename", ["README.md", "CLAUDE.md"])
+    def test_description_in_sync_with_docs(self, filename: str) -> None:
+        import re
+
+        text = (self._repo_root() / filename).read_text(encoding="utf-8")
+        # The tagline is the line describing the app; strip markdown links so the
+        # hyperlinked "[Hexgrad Kokoro](url)" compares equal to the plain text.
+        line = next(ln for ln in text.splitlines() if "multilingual speech" in ln)
+        unlinked = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line).strip()
+        assert unlinked == self._pyproject_description()
