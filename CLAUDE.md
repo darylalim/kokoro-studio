@@ -24,6 +24,8 @@ uv run streamlit run streamlit_app.py
 - **Unit tests**: `uv run pytest`
 - **Integration tests**: `uv run pytest tests_integration/`
 
+**CI** (`.github/workflows/ci.yml`, merge gate on push to `main` + every PR): runs on `macos-latest` only (mlx/mlx-metal are `darwin`-gated in `uv.lock`), brew-installs `espeak-ng`, then `uv sync --locked --group dev` (fails on lockfile drift) → `ruff check .` → `ruff format --check .` → `ty check` → `pytest`. The integration suite is excluded (needs the real modules + the ~355 MB download). Note CI gates on `ruff format --check .`, not the bare `ruff format .` above.
+
 ## Code Style
 
 - snake_case for functions/variables, PascalCase for classes
@@ -35,7 +37,7 @@ uv run streamlit run streamlit_app.py
 
 **System:** `espeak-ng`
 
-**Runtime:** `en-core-web-sm` (pinned URL; update wheel URL if spaCy is upgraded), `espeakng-loader`, `misaki[ja]`, `misaki[zh]`, `mlx-audio`, `num2words`, `numpy`, `phonemizer-fork`, `soundfile`, `spacy`, `streamlit`. The English G2P stack (`spacy`, `num2words`, `phonemizer-fork`, `espeakng-loader`) is pulled in directly rather than via `misaki[en]` to skip its heavy ML extras (`torch`, `transformers`, `spacy-curated-transformers`). Japanese requires a one-time UniDic dictionary download (`uv run python -m unidic download`, ~1 GB).
+**Runtime:** `en-core-web-sm` (pinned URL; update wheel URL if spaCy is upgraded), `espeakng-loader`, `misaki[ja]`, `misaki[zh]`, `mlx-audio`, `num2words`, `numpy`, `phonemizer-fork`, `soundfile`, `spacy`, `streamlit`. The English G2P stack (`spacy`, `num2words`, `phonemizer-fork`, `espeakng-loader`) is pulled in directly rather than via `misaki[en]` to skip its heavy ML extras (`torch`, `spacy-curated-transformers`, and a direct `transformers` pull — `torch`/`spacy-curated-transformers` are then absent from `uv.lock`, though `transformers` is still installed transitively via `mlx-audio`/`mlx-lm`). Japanese requires a one-time UniDic dictionary download (`uv run python -m unidic download`, ~1 GB).
 
 **Dev:** `ruff`, `ty`, `pytest`
 
@@ -43,7 +45,7 @@ uv run streamlit run streamlit_app.py
 
 `pyproject.toml` — project metadata, dependencies, dependency groups, ruff isort (`combine-as-imports`), pytest (`pythonpath`, `testpaths`), ty (`python-version = "3.12"`).
 
-`.streamlit/config.toml` — `[server] fileWatcherType = "none"` plus the "Kokoro indigo" theme: indigo `primaryColor` (`#4F46E5`, AA-contrast with white button text), `8px` radius, Inter body font (weights up to 800) with `headingFontWeights` (`[800, 600, …]`) rendering an extrabold h1 title above Streamlit's 700 default — h2–h6 keep the 600 default and headings reuse the body Inter, so no separate `headingFont` — and JetBrains Mono code font, and `[theme.light]`/`[theme.dark]` blocks defining both modes (with red/orange/green tuned to match the utterance-length caption bands). The app calls `st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")` as its first Streamlit command.
+`.streamlit/config.toml` — `[server] fileWatcherType = "none"` plus the "Kokoro indigo" `[theme]`: indigo `primaryColor` (`#4F46E5`, AA-contrast with white button text), `8px` `baseRadius`, `linkUnderline = false`, Inter body font (weights to 800) with `headingFontWeights = [800, 600, …]` — an extrabold h1 above Streamlit's 700 default, h2–h6 at the 600 default, headings reuse the body Inter so no separate `headingFont` — and JetBrains Mono `codeFont`. `[theme.light]`/`[theme.dark]` blocks define both modes (so the toolbar mode toggle appears): each sets a full GitHub-Primer base palette (`backgroundColor`/`secondaryBackgroundColor`/`textColor`/`borderColor`) plus `red`/`orange`/`green` tuned to the utterance-length caption bands — keep the two blocks in sync. The app calls `st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")` as its first Streamlit command.
 
 ## Architecture
 
@@ -53,9 +55,10 @@ uv run streamlit run streamlit_app.py
 - `voice_grades.py` — quality-grade table (`VOICE_GRADES`), rank table (`_GRADE_RANK`), and `_grade_rank` helper extracted from the Kokoro model card; consumed by the voice picker for sorting and labeling
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
 - `.streamlit/config.toml` — server config (`fileWatcherType = "none"`) plus the "Kokoro indigo" `[theme]` with `[theme.light]`/`[theme.dark]` blocks (so the toolbar mode toggle appears); the only `.streamlit/` file checked in (a `.gitignore` exception)
+- `.github/workflows/ci.yml` — CI merge gate (see Commands › CI): `macos-latest`, `ruff check` / `ruff format --check` / `ty check` / `pytest` over the unit suite only
 - `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import; the `streamlit` mock provides identity-pass-through shims for `cache_resource`, `cache_data`, and `fragment` so decorated functions keep running their real bodies under test
 - `tests/test_streamlit_app.py` — unit tests, including `seq`-ordered cache eviction/recency, the eviction protect set's displayed-key registration, `.streamlit/config.toml` theme validation (incl. the extrabold-h1 heading weight), and project-description consistency across `pyproject.toml`/README/CLAUDE.md
-- `tests_integration/conftest.py` — clears `streamlit`/`misaki`/`mlx_audio`/`huggingface_hub` from `sys.modules` so AppTest gets the real modules; incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
+- `tests_integration/conftest.py` — clears `streamlit`, `streamlit_app`, `misaki`, `mlx_audio`, and `huggingface_hub` from `sys.modules` so AppTest gets the real modules (`streamlit_app` needs its own prefix entry — the `streamlit` prefix doesn't match it — so the app is re-imported fresh under the real modules); incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
 - `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching, per-card speed controls
 
 ### Key Functions
@@ -87,7 +90,7 @@ uv run streamlit run streamlit_app.py
 - `_phoneme_band` — returns `(color, label)` for a phoneme count: `<20` red "very short", `20–99` orange "short", `100–399` green "ideal", `400–509` orange "long", `≥510` red "will be chunked"
 - `_render_length_caption` — colored `st.caption` under the textarea showing exact phoneme count when `last_phonemes` matches current `(text, lang_code)`, else `~estimate`
 - `_load_sample` — `@st.cache_data`, reads `samples/{lang_code}/{filename}` resolved relative to `streamlit_app.py`
-- `_pick_sample` — returns the full sample text or a random non-empty line from a one-per-line pool, depending on `is_random`
+- `_pick_sample` — returns the full sample text or a random non-empty line from a one-per-line pool, depending on `is_random`; the random branch avoids repeating the previous pick by tracking it in `st.session_state["_last_random_{lang}_{filename}"]` (re-rolls only when the pool has more than one line)
 - `_set_text_from_sample` — `on_click` callback that writes the chosen sample into `st.session_state["text_input"]`; must run between reruns to avoid Streamlit's "widget key already instantiated" error
 - `_render_sample_buttons` — renders one row of buttons per language from `SAMPLE_BUTTONS[lang_code]`; each button wired via `on_click=_set_text_from_sample`
 
@@ -108,7 +111,6 @@ On first launch, `ensure_repo_downloaded` calls `huggingface_hub.snapshot_downlo
 - MLX backend runs natively on Apple Silicon (no PyTorch or MPS fallback needed)
 - `@st.cache_resource` caches the model globally, tokenizers per language, and the snapshot path returned by `ensure_repo_downloaded`
 - `@st.cache_data` caches voice lists per language code (local filesystem walk, no TTL needed)
-- `ensure_repo_downloaded` first attempts `snapshot_download(..., local_files_only=True)` and only shows the spinner + downloads when the local cache is incomplete
 - `load_pipeline()` is deferred until the first per-card Play click, so initial page render is not blocked by model load
 - `generate_speech` uses `np.asarray(..., dtype=np.float32)` to avoid copying chunks that are already float32
 - Per-card audio results are stored in `st.session_state` keyed by `_cache_key`, so re-renders triggered by other interactions don't regenerate audio
@@ -141,18 +143,17 @@ On first launch, `ensure_repo_downloaded` calls `huggingface_hub.snapshot_downlo
 - 50/50 inner row via `st.columns([1, 1])`: speed selectbox on the left, Play button on the right
 - Speed selectbox: `SPEED_OPTIONS` (`[0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]`), default `1.0`, formatted as `"{x}x"` (e.g. `1.0x`), keyed `f"speed_{voice}"`, label hidden
 - Play button: `Play` with `icon=":material/play_arrow:"`, `type="primary"`, `width="stretch"`, keyed `f"play_{voice}"`, `disabled=not text.strip()`. Click handler loads the model (cached), runs `generate_one`, stamps `seq` via `_next_audio_seq`, stores the result in `st.session_state[_cache_key(voice, text, speed, lang_code)]`, then calls `_evict_old_audio`
-- When the current speed's cache key is present: an inline `st.audio` player plus a Download button (`f"download_{voice}"`, WAV via `_audio_to_wav_bytes`). Multiple voices' audios coexist for A/B comparison on the same text. When only another speed is cached: a "Click Play to refresh (speed changed)" caption above a stale-preview `st.audio` player (no download)
+- When the current speed's cache key is present: an inline `st.audio` player plus a Download button (`f"download_{voice}"`, WAV via `_audio_to_wav_bytes`, file named `f"{voice}_{speed}x.wav"`). Multiple voices' audios coexist for A/B comparison on the same text. When only another speed is cached: a "Click Play to refresh (speed changed)" caption above a stale-preview `st.audio` player (no download)
 
-**Audio cache lifecycle:**
-- Cache key includes voice, text, speed, lang_code (text via `_text_digest`) — changing any creates a new key, so the current-speed player disappears until Play is clicked again; a stale-preview player for a previously generated speed may still show via `_stale_cached_key`
-- Cached audios persist across reruns triggered by other interactions
-- Each result carries a monotonic `seq`; `_evict_old_audio` caps the cache at `AUDIO_CACHE_LIMIT` (20), evicting the lowest-`seq` (oldest-generated) entries. Both eviction and stale-preview selection order by `seq`, never by `st.session_state` iteration order (a hash-ordered set at runtime)
+**Audio cache lifecycle:** (mechanics live in Key Functions `_cache_key`/`_next_audio_seq`/`_evict_old_audio` and Performance — only the resulting UX is summarized here)
+- Changing voice/text/speed/lang yields a new `_cache_key`, so the current-speed player disappears until Play is pressed again; a stale-preview player for a previously generated speed may still show via `_stale_cached_key`
+- Cached audios persist across reruns triggered by other interactions, bounded at `AUDIO_CACHE_LIMIT` (20)
 
 **Behavior:**
 - On initial render, `ensure_repo_downloaded` may show an `st.spinner` (`~355 MB`) for the one-time model + voices download when the local HuggingFace cache is incomplete; otherwise no spinner appears
 - If the first-launch download fails (e.g. offline with no cache), the script shows `st.error(...)` and halts via `st.stop()` instead of leaking a Python traceback
 - Chunk-by-chunk generation progress appears via `st.status` inside the active card during the Play-triggered run
-- Expected/user-actionable per-card failures (`ValueError`, e.g. "No audio generated") surface as a clean `st.error(str(e))`; only genuinely unexpected errors fall through to `st.exception()`. Either way other cards remain functional
+- A per-card `ValueError` whose message contains `"No audio generated"` (the only such error raised) surfaces as a clean `st.error(str(e))`; every other exception — including any other `ValueError` — falls through to `st.exception()`. Either way other cards remain functional
 
 ## Resources
 
