@@ -10,6 +10,9 @@ __pycache__/
 .streamlit/*
 !.streamlit/config.toml
 
+# Generated audio (the app produces downloadable WAV output)
+*.wav
+
 # macOS
 .DS_Store
 

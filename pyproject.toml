@@ -1,6 +1,6 @@
 [project]
 name = "kokoro-studio"
-version = "0.14.0"
+version = "0.15.0"
 description = "Streamlit application for generating multilingual speech using Hexgrad Kokoro on Apple Silicon with MLX."
 requires-python = ">=3.12"
 dependencies = [
