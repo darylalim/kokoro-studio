@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-test:
+    name: Lint, type-check, test
+    # macOS arm64 runner: mlx / mlx-metal are gated to sys_platform == 'darwin'
+    # in uv.lock, so the full dependency set only resolves on Apple Silicon.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Documented system dependency (README / CLAUDE.md). Not exercised by the
+      # mocked unit tests, but keeps CI a faithful reproduction of a fresh setup
+      # and unblocks any future phonemization/integration smoke test.
+      - name: Install espeak-ng
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install espeak-ng
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # --locked installs exactly from uv.lock AND fails if the lock has drifted
+      # from pyproject.toml, so a stale lockfile is caught in CI.
+      - name: Sync dependencies
+        run: uv sync --locked --group dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check (ty)
+        run: uv run ty check
+
+      # Runs the mocked unit suite (testpaths = ["tests"]). Integration tests
+      # under tests_integration/ are intentionally excluded: they need the real
+      # modules plus the ~355 MB model download.
+      - name: Unit tests
+        run: uv run pytest

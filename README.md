@@ -1,5 +1,7 @@
 # Kokoro Studio
 
+[![CI](https://github.com/darylalim/kokoro-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/darylalim/kokoro-studio/actions/workflows/ci.yml)
+
 Streamlit application for generating multilingual speech using [Hexgrad Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
 ## Features

@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */uv.lock|uv.lock) printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Do not edit uv.lock directly. Use uv commands (uv add / uv remove / uv lock / uv sync) to change dependencies.\"}}';; esac",
+            "statusMessage": "Guarding uv.lock"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); case \"$f\" in *.py) cd \"${CLAUDE_PROJECT_DIR:-.}\" && uv run ruff format \"$f\" && uv run ruff check --fix \"$f\" || true;; esac",
+            "statusMessage": "ruff format + fix",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
