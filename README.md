@@ -44,3 +44,16 @@ uv run streamlit run streamlit_app.py
 - **Typecheck**: `uv run ty check`
 - **Unit tests**: `uv run pytest`
 - **Integration tests**: `uv run pytest tests_integration/`
+
+## License
+
+[MIT](LICENSE) © 2026 Daryl Lim
+
+### Third-party licenses & acknowledgements
+
+This app is a thin Streamlit front-end. At runtime it downloads and depends on third-party components under their own licenses:
+
+- **[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)** — the TTS model (Apache-2.0), downloaded on first launch and used unmodified; it is **not** redistributed in this repository.
+- The English G2P path pulls in **espeak-ng** and **phonemizer-fork** (both **GPLv3**) and **num2words** (**LGPL**). Installing and running the app from source via `uv sync` is unaffected by these terms, but note that a *bundled, redistributed build* (e.g. a Docker image or standalone binary that vendors these dependencies) would be a combined work subject to **GPLv3**.
+
+Bundled sample texts under `samples/` are public domain.
