@@ -26,6 +26,8 @@ uv run streamlit run streamlit_app.py
 
 **CI** (`.github/workflows/ci.yml`, merge gate on push to `main` + every PR): runs on `macos-latest` only (mlx/mlx-metal are `darwin`-gated in `uv.lock`), brew-installs `espeak-ng`, then `uv sync --locked --group dev` (fails on lockfile drift) → `ruff check .` → `ruff format --check .` → `ty check` → `pytest`. The integration suite is excluded (needs the real modules + the ~355 MB download). Note CI gates on `ruff format --check .`, not the bare `ruff format .` above.
 
+**Releases** (`.github/workflows/release.yml`, tag-triggered): pushing a `vX.Y.Z` tag verifies it matches `pyproject.toml`'s `version` (fails loud on drift), then runs `gh release create --generate-notes` to publish a GitHub Release titled by tag name. Flow: bump `version` in `pyproject.toml` (then `uv lock` to sync `uv.lock`), commit, `git tag -a vX.Y.Z`, push the tag. Final releases only; runs on `ubuntu-latest` (no build/test — that is CI's job).
+
 ## Code Style
 
 - snake_case for functions/variables, PascalCase for classes
@@ -56,6 +58,8 @@ uv run streamlit run streamlit_app.py
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
 - `.streamlit/config.toml` — server config (`fileWatcherType = "none"`) plus the "Kokoro indigo" `[theme]` with `[theme.light]`/`[theme.dark]` blocks (so the toolbar mode toggle appears); the only `.streamlit/` file checked in (a `.gitignore` exception)
 - `.github/workflows/ci.yml` — CI merge gate (see Commands › CI): `macos-latest`, `ruff check` / `ruff format --check` / `ty check` / `pytest` over the unit suite only
+- `.github/workflows/release.yml` — tag-triggered release (see Commands › Releases): on a `vX.Y.Z` tag push, verifies the tag matches `pyproject.toml`'s `version`, then `gh release create --generate-notes` on `ubuntu-latest`
+- `LICENSE` — MIT (declared via `license = "MIT"` + `license-files = ["LICENSE"]` in `pyproject.toml`); runtime deps add GPLv3/LGPL terms — see README acknowledgements
 - `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import; the `streamlit` mock provides identity-pass-through shims for `cache_resource`, `cache_data`, and `fragment` so decorated functions keep running their real bodies under test
 - `tests/test_streamlit_app.py` — unit tests, including `seq`-ordered cache eviction/recency, the eviction protect set's displayed-key registration, `.streamlit/config.toml` theme validation (incl. the extrabold-h1 heading weight), project-description consistency across `pyproject.toml`/README/CLAUDE.md, MIT-license consistency across `LICENSE`/`pyproject.toml`/README (`TestLicensing`), and the release workflow's pyproject-version extractability (`TestReleaseWorkflow`)
 - `tests_integration/conftest.py` — clears `streamlit`, `streamlit_app`, `misaki`, `mlx_audio`, and `huggingface_hub` from `sys.modules` so AppTest gets the real modules (`streamlit_app` needs its own prefix entry — the `streamlit` prefix doesn't match it — so the app is re-imported fresh under the real modules); incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`

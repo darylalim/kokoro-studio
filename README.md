@@ -1,6 +1,7 @@
 # Kokoro Studio
 
 [![CI](https://github.com/darylalim/kokoro-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/darylalim/kokoro-studio/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Streamlit application for generating multilingual speech using [Hexgrad Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
@@ -44,6 +45,18 @@ uv run streamlit run streamlit_app.py
 - **Typecheck**: `uv run ty check`
 - **Unit tests**: `uv run pytest`
 - **Integration tests**: `uv run pytest tests_integration/`
+
+### Releasing
+
+Pushing a `vX.Y.Z` tag publishes a GitHub Release automatically (via `.github/workflows/release.yml`), with notes generated from the commits since the previous tag:
+
+```bash
+# bump `version` in pyproject.toml (then `uv lock` to sync uv.lock), commit, then:
+git tag -a v0.16.0 -m "v0.16.0"
+git push origin v0.16.0
+```
+
+The workflow verifies the tag matches `pyproject.toml`'s `version` before publishing.
 
 ## License
 

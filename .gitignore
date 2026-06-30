@@ -2,6 +2,11 @@
 __pycache__/
 .venv/
 
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
 # Tools
 .pytest_cache/
 .ruff_cache/
