@@ -1,0 +1,57 @@
+name: Release
+
+# Publish a GitHub Release when a semver tag (vX.Y.Z) is pushed. Pairs with the
+# manual bump-and-tag step: bump pyproject.toml, `git tag -a vX.Y.Z`, push the
+# tag — this job verifies the tag matches the package version and cuts the
+# release with auto-generated notes. Fires from v0.16.0 onward (this file must
+# exist at the tagged commit). Final releases only; for a prerelease, add a
+# `-*` tag pattern plus PEP 440-aware version normalisation.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"   # vMAJOR.MINOR.PATCH, e.g. v0.16.0
+
+# gh release create needs write access to repository contents.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    # No build/test here (that is the CI workflow's job, and it runs on macOS);
+    # this only cuts the release, so the cheap Linux runner is fine.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Default depth-1 checkout, only so the guard can read pyproject.toml at
+      # the tagged commit. (--generate-notes is computed server-side, so no full
+      # history is needed.)
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Guard: the tag must match pyproject's version, so a tag can't drift from
+      # the package version (a real risk with manual bumps). Reads the single
+      # `version = "..."` line with grep/sed — no Python/tomllib dependency on
+      # the runner image.
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          proj="$(grep -m1 -E '^version = "' pyproject.toml | sed -E 's/^version = "([^"]+)".*/\1/')"
+          echo "tag=${tag}  pyproject=${proj}"
+          if [ "${tag}" != "${proj}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match pyproject version ${proj}. Bump pyproject.toml or retag."
+            exit 1
+          fi
+
+      # Cut the release with server-side auto-generated notes (diffed against the
+      # previous release). GitHub auto-marks the newest release as "Latest".
+      # Re-running after success errors ("release already exists") — delete the
+      # release first to re-cut.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Kokoro Studio ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
