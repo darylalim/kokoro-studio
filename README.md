@@ -48,15 +48,16 @@ uv run streamlit run streamlit_app.py
 
 ### Releasing
 
-Pushing a `vX.Y.Z` tag publishes a GitHub Release automatically (via `.github/workflows/release.yml`), with notes generated from the commits since the previous tag:
+Pushing a `vX.Y.Z` tag publishes a GitHub Release automatically (via `.github/workflows/release.yml`), with notes generated from the commits since the previous release:
 
 ```bash
-# bump `version` in pyproject.toml (then `uv lock` to sync uv.lock), commit, then:
-git tag -a v0.16.0 -m "v0.16.0"
-git push origin v0.16.0
+# bump `version` in pyproject.toml (X.Y.Z), then `uv lock` to sync uv.lock, then commit.
+git push origin main          # let CI validate the bump commit, and keep main level with the tag
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z        # this tag push triggers the release
 ```
 
-The workflow verifies the tag matches `pyproject.toml`'s `version` before publishing.
+The workflow verifies the tag matches `pyproject.toml`'s `version` before publishing. It does **not** itself wait on CI, so confirm CI is green on the bump commit first.
 
 ## License
 
@@ -66,7 +67,7 @@ The workflow verifies the tag matches `pyproject.toml`'s `version` before publis
 
 This app is a thin Streamlit front-end. At runtime it downloads and depends on third-party components under their own licenses:
 
-- **[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)** — the TTS model (Apache-2.0), downloaded on first launch and used unmodified; it is **not** redistributed in this repository.
-- The English G2P path pulls in **espeak-ng** and **phonemizer-fork** (both **GPLv3**) and **num2words** (**LGPL**). Installing and running the app from source via `uv sync` is unaffected by these terms, but note that a *bundled, redistributed build* (e.g. a Docker image or standalone binary that vendors these dependencies) would be a combined work subject to **GPLv3**.
+- **[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)** by hexgrad — the upstream TTS model (Apache-2.0). At runtime the app downloads the [`mlx-community/Kokoro-82M-bf16`](https://huggingface.co/mlx-community/Kokoro-82M-bf16) MLX conversion (a bf16 derivative, also Apache-2.0); neither is redistributed in this repository.
+- The English G2P path pulls in **espeak-ng** and **phonemizer-fork** (both **GPLv3**) and **num2words** (**LGPL**). Installing and running the app from source via `uv sync` is unaffected by these terms, but note that a *bundled, redistributed build* (e.g. a Docker image or standalone binary that vendors the GPLv3 dependencies) would be a combined work subject to **GPLv3**. num2words is LGPL, whose weaker terms don't impose GPLv3 on the larger work.
 
 Bundled sample texts under `samples/` are public domain.

@@ -26,7 +26,7 @@ uv run streamlit run streamlit_app.py
 
 **CI** (`.github/workflows/ci.yml`, merge gate on push to `main` + every PR): runs on `macos-latest` only (mlx/mlx-metal are `darwin`-gated in `uv.lock`), brew-installs `espeak-ng`, then `uv sync --locked --group dev` (fails on lockfile drift) → `ruff check .` → `ruff format --check .` → `ty check` → `pytest`. The integration suite is excluded (needs the real modules + the ~355 MB download). Note CI gates on `ruff format --check .`, not the bare `ruff format .` above.
 
-**Releases** (`.github/workflows/release.yml`, tag-triggered): pushing a `vX.Y.Z` tag verifies it matches `pyproject.toml`'s `version` (fails loud on drift), then runs `gh release create --generate-notes` to publish a GitHub Release titled by tag name. Flow: bump `version` in `pyproject.toml` (then `uv lock` to sync `uv.lock`), commit, `git tag -a vX.Y.Z`, push the tag. Final releases only; runs on `ubuntu-latest` (no build/test — that is CI's job).
+**Releases** (`.github/workflows/release.yml`, tag-triggered): pushing a `vX.Y.Z` tag verifies it matches `pyproject.toml`'s `version` (fails loud on drift), then runs `gh release create --generate-notes` to publish a GitHub Release titled by tag name (notes diffed against the previous release). Flow: bump `version` in `pyproject.toml` (then `uv lock` to sync `uv.lock`), commit, `git push origin main` (CI validates the bump commit — the release job does **not** itself gate on CI), then `git tag -a vX.Y.Z` and push the tag. Final releases only; runs on `ubuntu-latest` (no build/test — that is CI's job).
 
 ## Code Style
 

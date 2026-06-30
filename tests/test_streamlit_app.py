@@ -1848,16 +1848,21 @@ class TestLicensing:
         readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
         assert "## License" in readme
         assert "[MIT](LICENSE)" in readme
+        # The third-party copyleft acknowledgement must not silently disappear.
+        assert "GPLv3" in readme and "LGPL" in readme
 
     def test_license_consistent_across_sources(self) -> None:
-        # pyproject's SPDX id is the source of truth; the LICENSE header and the
-        # README badge must agree, so changing the license can't silently desync
-        # the three places it is declared.
+        # pyproject's SPDX id is the source of truth; the LICENSE header, the
+        # README badge, and the README section link must all agree, so a license
+        # change can't silently desync them. (The header check assumes MIT's
+        # "MIT License" header equals the SPDX id; switching to e.g. Apache-2.0
+        # trips this intentionally, forcing a re-review of all three sources.)
         spdx = self._pyproject()["project"]["license"]
         license_text = (self._repo_root() / "LICENSE").read_text(encoding="utf-8")
         readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
         assert license_text.startswith(f"{spdx} License")
-        assert f"[{spdx}](LICENSE)" in readme
+        assert f"[{spdx}](LICENSE)" in readme  # ## License section link
+        assert f"License-{spdx}-" in readme  # shields.io badge path segment
 
 
 class TestReleaseWorkflow:
@@ -1891,3 +1896,20 @@ class TestReleaseWorkflow:
         with (root / "pyproject.toml").open("rb") as f:
             parsed = tomllib.load(f)["project"]["version"]
         assert match.group(1) == parsed
+        # The release trigger fires only on `v[0-9]+.[0-9]+.[0-9]+` tags, so the
+        # version must be exactly X.Y.Z — a 2-segment or PEP 440 prerelease such as
+        # "1.0.0rc1" would pass extraction yet push a tag that never fires release.yml.
+        assert re.fullmatch(r"\d+\.\d+\.\d+", parsed), (
+            "version must be X.Y.Z so a vX.Y.Z tag matches release.yml's trigger"
+        )
+
+    def test_release_workflow_mirrors_version_guard(self) -> None:
+        # Bind this test file to release.yml so the two version guards can't drift
+        # apart: if the workflow's grep pattern or trigger glob changes, the
+        # pyproject-side check above silently stops mirroring it — fail loudly here.
+        workflow = (
+            self._repo_root() / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        assert "grep -m1 -E '^version = \"'" in workflow
+        assert "v[0-9]+.[0-9]+.[0-9]+" in workflow
+        assert "contents: write" in workflow
