@@ -5,6 +5,11 @@
 
 Streamlit application for generating multilingual speech using [Hexgrad Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
+<p align="center">
+  <img src="assets/screenshot-light.png" width="49%" alt="Kokoro Studio (light theme) — language selector and text input beside a grade-sorted voice-card grid">
+  <img src="assets/screenshot-dark.png" width="49%" alt="Kokoro Studio (dark theme)">
+</p>
+
 ## Features
 
 - 9 supported languages (American English, British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin Chinese)
