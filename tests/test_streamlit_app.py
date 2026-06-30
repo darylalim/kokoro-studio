@@ -1814,3 +1814,80 @@ class TestProjectMetadata:
         line = next(ln for ln in text.splitlines() if "multilingual speech" in ln)
         unlinked = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line).strip()
         assert unlinked == self._pyproject_description()
+
+
+class TestLicensing:
+    """Keep the MIT license declared consistently across the LICENSE file,
+    pyproject.toml (the source of truth), and the README."""
+
+    @staticmethod
+    def _repo_root() -> Path:
+        import streamlit_app
+
+        return Path(streamlit_app.__file__).parent
+
+    def _pyproject(self) -> dict[str, Any]:
+        import tomllib
+
+        with (self._repo_root() / "pyproject.toml").open("rb") as f:
+            return tomllib.load(f)
+
+    def test_license_file_is_mit(self) -> None:
+        text = (self._repo_root() / "LICENSE").read_text(encoding="utf-8")
+        # A real MIT body, not just a header line.
+        assert text.startswith("MIT License")
+        assert "Permission is hereby granted, free of charge" in text
+        assert "WITHOUT WARRANTY OF ANY KIND" in text
+
+    def test_pyproject_declares_mit(self) -> None:
+        project = self._pyproject()["project"]
+        assert project["license"] == "MIT"
+        assert "LICENSE" in project["license-files"]
+
+    def test_readme_documents_license(self) -> None:
+        readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
+        assert "## License" in readme
+        assert "[MIT](LICENSE)" in readme
+
+    def test_license_consistent_across_sources(self) -> None:
+        # pyproject's SPDX id is the source of truth; the LICENSE header and the
+        # README badge must agree, so changing the license can't silently desync
+        # the three places it is declared.
+        spdx = self._pyproject()["project"]["license"]
+        license_text = (self._repo_root() / "LICENSE").read_text(encoding="utf-8")
+        readme = (self._repo_root() / "README.md").read_text(encoding="utf-8")
+        assert license_text.startswith(f"{spdx} License")
+        assert f"[{spdx}](LICENSE)" in readme
+
+
+class TestReleaseWorkflow:
+    """Guard the assumption the release workflow (.github/workflows/release.yml)
+    relies on when it checks tag/version drift."""
+
+    @staticmethod
+    def _repo_root() -> Path:
+        import streamlit_app
+
+        return Path(streamlit_app.__file__).parent
+
+    def test_release_workflow_present(self) -> None:
+        path = self._repo_root() / ".github" / "workflows" / "release.yml"
+        assert path.is_file()
+
+    def test_pyproject_version_is_grep_extractable(self) -> None:
+        import re
+        import tomllib
+
+        # release.yml extracts the version with: grep -m1 -E '^version = "' | sed.
+        # Guard that pyproject keeps exactly one top-level `version = "X"` line and
+        # that the shell-extracted value matches tomllib's parsed value, so the
+        # workflow's drift check stays valid if pyproject is ever reformatted.
+        root = self._repo_root()
+        lines = (root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        version_lines = [ln for ln in lines if re.match(r'^version = "', ln)]
+        assert len(version_lines) == 1, "expected exactly one top-level version line"
+        match = re.match(r'^version = "([^"]+)"', version_lines[0])
+        assert match is not None
+        with (root / "pyproject.toml").open("rb") as f:
+            parsed = tomllib.load(f)["project"]["version"]
+        assert match.group(1) == parsed
