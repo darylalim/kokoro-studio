@@ -150,7 +150,15 @@ def get_voices(lang_code: str) -> list[str]:
 
 @st.cache_resource
 def load_pipeline() -> Any:
-    return load_model(REPO_ID)  # ty: ignore[invalid-argument-type]
+    model = load_model(REPO_ID)  # ty: ignore[invalid-argument-type]
+    # mlx-audio's Kokoro Model hard-codes `prince-canuma/Kokoro-82M` as the repo
+    # it pulls voice tensors from, because its loader builds `Model(config)`
+    # without forwarding a repo_id. Left alone, every Play re-downloads a voice
+    # we already have in our own snapshot. `_get_pipeline` reads this attribute
+    # when it first builds (and caches) a per-language pipeline, so setting it
+    # here — before any Play click — keeps voice loading offline and local.
+    model.repo_id = REPO_ID
+    return model
 
 
 def _create_g2p(lang_code: str) -> Any:

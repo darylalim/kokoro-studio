@@ -134,6 +134,12 @@ class TestLoadPipeline:
         load_pipeline()
         load_model.assert_called_with(REPO_ID)  # ty: ignore[unresolved-attribute]
 
+    def test_pins_voice_repo_to_our_snapshot(self) -> None:
+        # Without this, mlx-audio falls back to its hard-coded
+        # `prince-canuma/Kokoro-82M` for voice tensors, re-downloading voices
+        # already in our snapshot and breaking the offline guarantee.
+        assert load_pipeline().repo_id == REPO_ID
+
 
 class TestCreateG2p:
     def test_american_english_uses_en_g2p(self) -> None:
