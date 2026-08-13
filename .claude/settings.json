@@ -1,25 +1,25 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */uv.lock|uv.lock) printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Do not edit uv.lock directly. Use uv commands (uv add / uv remove / uv lock / uv sync) to change dependencies.\"}}';; esac",
-            "statusMessage": "Guarding uv.lock"
-          }
-        ]
-      }
+  "permissions": {
+    "deny": [
+      "Edit(uv.lock)",
+      "Write(uv.lock)",
+      "MultiEdit(uv.lock)"
     ],
+    "ask": [
+      "Edit(.python-version)",
+      "Write(.python-version)",
+      "MultiEdit(.python-version)"
+    ]
+  },
+  "hooks": {
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); case \"$f\" in *.py) cd \"${CLAUDE_PROJECT_DIR:-.}\" && uv run ruff format \"$f\" && uv run ruff check --fix \"$f\" || true;; esac",
-            "statusMessage": "ruff format + fix",
+            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); d=\"${CLAUDE_PROJECT_DIR:-}\"; [ -n \"$d\" ] || exit 0; case \"$f\" in \"$d\"/*.py) cd \"$d\" && uv run sh -c 'ruff check --fix \"$1\"; a=$?; ruff format \"$1\"; b=$?; [ \"$a\" = 0 ] && [ \"$b\" = 0 ] || exit 2' _ \"$f\";; esac",
+            "statusMessage": "ruff check --fix + format",
             "timeout": 60
           }
         ]
