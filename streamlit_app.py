@@ -191,6 +191,24 @@ def tokenize_text(text: str, lang_code: str) -> str:
     return phonemes or ""
 
 
+def _tokenize_error_message(lang_code: str, error: Exception) -> str:
+    """Friendly, in-place message for a tokenization failure.
+
+    Tokenizing builds a per-language G2P stack, so it fails for environment
+    reasons far more often than for bad input. The common one is the Japanese
+    UniDic dictionary: it installs into the venv's `unidic` package directory,
+    so any venv rebuild silently removes it and every Japanese request then
+    raises. That case gets the recovery command instead of a raw error.
+    """
+    if lang_code == "j" and "unidic" in str(error).lower():
+        return (
+            "Japanese tokenization needs the UniDic dictionary, which is "
+            "missing. Run `uv run python -m unidic download` (one-time, "
+            "~1 GB), then reload this page."
+        )
+    return f"Could not tokenize this text: {error}"
+
+
 def _format_voice(voice: str) -> str:
     if "_" not in voice:
         return voice
@@ -441,7 +459,9 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                     st.error(str(e))
                 else:
                     st.exception(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                # Last-resort UI guard: any failure in one card must not take
+                # down the sibling cards, so it is surfaced in-place instead.
                 st.exception(e)
         if key in st.session_state:
             audio = st.session_state[key]["audio"]
@@ -489,7 +509,9 @@ st.title("Kokoro Studio")
 
 try:
     ensure_repo_downloaded()
-except Exception:
+except Exception:  # noqa: BLE001
+    # Any failure here (network, HuggingFace, filesystem) means the app cannot
+    # run, so all of them get the same friendly message rather than a traceback.
     st.error(
         "Could not download the Kokoro model. Connect to the internet and reload the page."
     )
@@ -520,11 +542,18 @@ with input_col:
         disabled=not text_input.strip(),
     )
     if tokenize_clicked:
-        st.session_state["last_phonemes"] = (
-            text_input,
-            lang_code,
-            tokenize_text(text_input, lang_code),
-        )
+        try:
+            st.session_state["last_phonemes"] = (
+                text_input,
+                lang_code,
+                tokenize_text(text_input, lang_code),
+            )
+        except Exception as e:  # noqa: BLE001
+            # Same UI guard as the per-card Play handler: a G2P failure must
+            # degrade in place rather than replace the whole page with a
+            # traceback. This is the only unwrapped path that loads a
+            # tokenizer, so it is where a missing UniDic dictionary surfaces.
+            st.error(_tokenize_error_message(lang_code, e))
     _render_length_caption(text_input, lang_code)
     _render_persistent_phonemes(text_input, lang_code)
     st.markdown("**Note:**")

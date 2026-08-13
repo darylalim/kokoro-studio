@@ -16,6 +16,10 @@ uv run python -m unidic download   # one-time, ~1 GB, only needed for Japanese
 uv run streamlit run streamlit_app.py
 ```
 
+`.python-version` pins the interpreter to **3.12**, matching CI (`setup-uv` requests `python-version: "3.12"`), the `requires-python = ">=3.12"` floor, and `[tool.ty.environment]`. Without it `uv sync` falls back to uv's normal interpreter discovery and takes the first candidate satisfying `requires-python` — not necessarily the version CI uses — which silently drifts local dev off the version CI actually gates on — and since CI excludes `tests_integration/`, that suite would then never run on 3.12 anywhere. Keep `ty` targeting 3.12 even if a newer interpreter is used locally: type-checking against the declared floor is what catches accidental use of newer-only APIs.
+
+Note that changing the pinned version makes the next `uv sync` rebuild the venv, which discards the ~1 GB UniDic dictionary (it installs into the venv's `unidic` package directory). Re-run `uv run python -m unidic download` afterwards if you use Japanese.
+
 ## Commands
 
 - **Lint**: `uv run ruff check .`
@@ -33,11 +37,15 @@ uv run streamlit run streamlit_app.py
 - snake_case for functions/variables, PascalCase for classes
 - Type annotations on all parameters and returns
 - isort with combine-as-imports (configured in `pyproject.toml`)
+- `pyproject.toml` sets no `[tool.ruff.lint] select`, so the project runs on **ruff's default rule set** — which ruff 0.16 widened from 59 rules to 413 (this is what first enabled the `I` isort rules the repo had already configured but never enforced). A ruff upgrade can therefore surface new findings without any code change; check `ruff check .` after every bump rather than assuming a clean tree stays clean.
+- The two `except Exception` handlers in `streamlit_app.py` carry `# noqa: BLE001` and are deliberate: broad catches are correct here because the app must degrade to a friendly `st.error` / in-card `st.exception` instead of leaking a traceback into the UI. Don't narrow them to satisfy the linter.
 - When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and ruff to ensure best practices are followed.
 
 ## Dependencies
 
 **System:** `espeak-ng`
+
+> **Keep the venv path short.** espeak-ng stores its data directory in a fixed 160-byte `N_PATH_HOME` buffer. If the resolved `espeakng_loader/espeak-ng-data` path exceeds it, the path is truncated, espeak falls back to the build-machine path baked into the wheel (`/Users/runner/work/espeakng-loader/...`), fails to find `phontab`, and calls `exit(1)` directly — the process dies with **exit code 1, no Python traceback, no pytest summary, and buffered output lost**. It reads like a mysterious interpreter-specific crash. To check a given checkout, measure the resolved data directory — `<venv>/lib/pythonX.Y/site-packages/espeakng_loader/espeak-ng-data` — and keep it comfortably under ~159 characters; a `.venv` in the repo root is normally fine, while a venv under a deeply nested CI cache or temp directory may not be. (The 160-byte figure is inferred from the observed truncation boundary, not read from espeak-ng's source, so treat it as approximate.) Since `misaki/espeak.py` calls `EspeakWrapper.set_data_path()` at import time, a later override cannot fix it — espeak is already initialized.
 
 **Runtime:** `en-core-web-sm` (pinned URL; update wheel URL if spaCy is upgraded), `espeakng-loader`, `misaki[ja]`, `misaki[zh]`, `mlx-audio`, `num2words`, `numpy`, `phonemizer-fork`, `soundfile`, `spacy`, `streamlit`. The English G2P stack (`spacy`, `num2words`, `phonemizer-fork`, `espeakng-loader`) is pulled in directly rather than via `misaki[en]` to skip its heavy ML extras (`torch`, `spacy-curated-transformers`, and a direct `transformers` pull — `torch`/`spacy-curated-transformers` are then absent from `uv.lock`, though `transformers` is still installed transitively via `mlx-audio`/`mlx-lm`). Japanese requires a one-time UniDic dictionary download (`uv run python -m unidic download`, ~1 GB).
 
@@ -56,6 +64,7 @@ uv run streamlit run streamlit_app.py
 - `streamlit_app.py` — main app: language selector, text input + per-language sample buttons + Tokenize button + utterance-length caption + pronunciation note (left column), gender segmented control + per-card voice grid with per-card Play button + speed dropdown + inline audio playback + download button (right column)
 - `voice_grades.py` — quality-grade table (`VOICE_GRADES`), rank table (`_GRADE_RANK`), and `_grade_rank` helper extracted from the Kokoro model card; consumed by the voice picker for sorting and labeling
 - `samples/` — bundled public-domain sample text per language (9 directories × 3 files: `random.txt` quote pool plus two literary excerpts); referenced by `SAMPLE_BUTTONS` and read by `_load_sample`
+- `.python-version` — pins the interpreter to `3.12` so local dev matches CI, `requires-python`, and ty (see Installation)
 - `.streamlit/config.toml` — server config (`fileWatcherType = "none"`) plus the "Kokoro indigo" `[theme]` with `[theme.light]`/`[theme.dark]` blocks (so the toolbar mode toggle appears); the only `.streamlit/` file checked in (a `.gitignore` exception)
 - `.github/workflows/ci.yml` — CI merge gate (see Commands › CI): `macos-latest`, `ruff check` / `ruff format --check` / `ty check` / `pytest` over the unit suite only
 - `.github/workflows/release.yml` — tag-triggered release (see Commands › Releases): on a `vX.Y.Z` tag push, verifies the tag matches `pyproject.toml`'s `version`, then `gh release create --generate-notes` on `ubuntu-latest`
@@ -63,7 +72,7 @@ uv run streamlit run streamlit_app.py
 - `tests/conftest.py` — mocks `streamlit`, `mlx_audio`, `misaki`, and `huggingface_hub` for import; the `streamlit` mock provides identity-pass-through shims for `cache_resource`, `cache_data`, and `fragment` so decorated functions keep running their real bodies under test
 - `tests/test_streamlit_app.py` — unit tests, including `seq`-ordered cache eviction/recency, the eviction protect set's displayed-key registration, `.streamlit/config.toml` theme validation (incl. the extrabold-h1 heading weight), project-description consistency across `pyproject.toml`/README/CLAUDE.md, MIT-license consistency across `LICENSE`/`pyproject.toml`/README (`TestLicensing`), and the release workflow's pyproject-version extractability (`TestReleaseWorkflow`)
 - `tests_integration/conftest.py` — clears `streamlit`, `streamlit_app`, `misaki`, `mlx_audio`, and `huggingface_hub` from `sys.modules` so AppTest gets the real modules (`streamlit_app` needs its own prefix entry — the `streamlit` prefix doesn't match it — so the app is re-imported fresh under the real modules); incompatible with `tests/conftest.py`'s mocks in one process, so `testpaths = ["tests"]` keeps the integration suite opt-in via an explicit `uv run pytest tests_integration/`
-- `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching, per-card speed controls
+- `tests_integration/test_app_integration.py` — AppTest integration tests: initial render, sample buttons, Tokenize/Play enablement, gender filter, language switching, per-card speed controls. Feeds `AppTest.from_file` an absolute `APP_PATH` (`Path(__file__).resolve().parent.parent / "streamlit_app.py"`) — streamlit 1.61 changed relative-path resolution from the working directory to the directory of the calling file, so the bare `"streamlit_app.py"` this used to pass now raises `FileNotFoundError`
 
 ### Key Functions
 

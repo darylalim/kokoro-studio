@@ -1,12 +1,19 @@
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
 
 # The initial run touches the local model snapshot and lazily loads a misaki
 # tokenizer when Tokenize is clicked, so allow generous headroom.
 DEFAULT_TIMEOUT = 60
 
+# Absolute so the suite is independent of both the working directory and of
+# AppTest's own relative-path base, which streamlit 1.61 changed from the
+# working directory to the directory of the file calling from_file().
+APP_PATH = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+
 
 def _run_app() -> AppTest:
-    return AppTest.from_file("streamlit_app.py", default_timeout=DEFAULT_TIMEOUT).run()
+    return AppTest.from_file(APP_PATH, default_timeout=DEFAULT_TIMEOUT).run()
 
 
 def _voice_titles(at: AppTest) -> list[str]:

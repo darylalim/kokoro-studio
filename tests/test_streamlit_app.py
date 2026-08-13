@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -7,6 +7,7 @@ import pytest
 import streamlit as st
 
 from streamlit_app import (
+    _PHONEME_MULTIPLIERS,
     AUDIO_CACHE_LIMIT,
     DEFAULT_SPEED_INDEX,
     ESPEAK_LANGUAGES,
@@ -16,7 +17,6 @@ from streamlit_app import (
     SAMPLE_BUTTONS,
     SAMPLE_RATE,
     SPEED_OPTIONS,
-    _PHONEME_MULTIPLIERS,
     _audio_to_wav_bytes,
     _cache_key,
     _create_g2p,
@@ -36,6 +36,7 @@ from streamlit_app import (
     _set_text_from_sample,
     _split_voices_for_display,
     _text_digest,
+    _tokenize_error_message,
     ensure_repo_downloaded,
     generate_one,
     generate_speech,
@@ -392,7 +393,7 @@ class TestGenerateOne:
 
 
 class TestSplitVoicesForDisplay:
-    LONG = [f"af_v{i}" for i in range(10)]  # 10 voices
+    LONG: ClassVar[list[str]] = [f"af_v{i}" for i in range(10)]  # 10 voices
 
     def test_empty_returns_two_empty_lists(self) -> None:
         assert _split_voices_for_display([], None) == ([], [])
@@ -1919,3 +1920,82 @@ class TestReleaseWorkflow:
         assert "grep -m1 -E '^version = \"'" in workflow
         assert "v[0-9]+.[0-9]+.[0-9]+" in workflow
         assert "contents: write" in workflow
+
+
+class TestPythonVersionConsistency:
+    """The target Python version is declared in four places that must agree:
+    `.python-version` (what uv builds the venv from), `requires-python` (the
+    supported floor), `[tool.ty.environment]` (what ty checks against), and the
+    CI workflow. Drift here is silent — everything stays green while local dev,
+    CI, and the type checker quietly target different versions."""
+
+    EXPECTED: ClassVar[str] = "3.12"
+
+    @staticmethod
+    def _repo_root() -> Path:
+        import streamlit_app
+
+        return Path(streamlit_app.__file__).parent
+
+    def _pyproject(self) -> dict[str, Any]:
+        import tomllib
+
+        with (self._repo_root() / "pyproject.toml").open("rb") as f:
+            return tomllib.load(f)
+
+    def test_python_version_file(self) -> None:
+        path = self._repo_root() / ".python-version"
+        assert path.is_file(), ".python-version pins the interpreter for uv sync"
+        assert path.read_text(encoding="utf-8").strip() == self.EXPECTED
+
+    def test_requires_python_floor(self) -> None:
+        assert (
+            self._pyproject()["project"]["requires-python"] == f">={self.EXPECTED}"
+        ), "requires-python floor must match the pinned interpreter"
+
+    def test_ty_target(self) -> None:
+        ty_env = self._pyproject()["tool"]["ty"]["environment"]
+        assert ty_env["python-version"] == self.EXPECTED, (
+            "ty must type-check against the declared floor"
+        )
+
+    def test_ci_workflow_matches(self) -> None:
+        # CI pins the interpreter through setup-uv rather than reading
+        # .python-version, so the two are independent declarations that can
+        # drift. uv resolves `.python-version` ahead of the UV_PYTHON that
+        # setup-uv exports, which means a mismatch would leave CI testing a
+        # different version than it claims to.
+        workflow = (self._repo_root() / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        assert f'python-version: "{self.EXPECTED}"' in workflow
+
+
+class TestTokenizeErrorMessage:
+    """The Tokenize handler catches G2P failures so they render in place. The
+    missing-UniDic case is called out by name because the dictionary lives in
+    the venv and vanishes on any venv rebuild — an error the user can fix."""
+
+    def test_missing_unidic_gives_recovery_command(self) -> None:
+        error = RuntimeError(
+            "param.cpp(69) [ifs] no such file or directory: "
+            "/repo/.venv/lib/python3.12/site-packages/unidic/dicdir/mecabrc"
+        )
+        message = _tokenize_error_message("j", error)
+        assert "unidic download" in message
+        assert "~1 GB" in message
+
+    def test_other_japanese_error_falls_through(self) -> None:
+        message = _tokenize_error_message("j", ValueError("something else"))
+        assert "unidic download" not in message
+        assert "something else" in message
+
+    def test_non_japanese_unidic_mention_falls_through(self) -> None:
+        # The recovery hint is Japanese-only; another language must not claim a
+        # dictionary download would fix it.
+        message = _tokenize_error_message("a", RuntimeError("unidic"))
+        assert "unidic download" not in message
+
+    def test_generic_error_includes_cause(self) -> None:
+        message = _tokenize_error_message("z", RuntimeError("g2p exploded"))
+        assert "g2p exploded" in message

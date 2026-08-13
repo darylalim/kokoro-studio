@@ -66,7 +66,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 ## Requirements
 
 - macOS with Apple Silicon (M1 or newer)
-- Python 3.12+
+- Python 3.12+ — the repo ships a `.python-version` pinning **3.12** (matching CI), so `uv sync` builds the venv on 3.12 even if you have a newer Python installed
 - [uv](https://docs.astral.sh/uv/) — install with `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - [espeak-ng](https://github.com/espeak-ng/espeak-ng)
 
@@ -92,6 +92,8 @@ Japanese G2P needs the UniDic dictionary, a one-time ~1 GB download. Skip this u
 ```bash
 uv run python -m unidic download
 ```
+
+> **Note:** The dictionary installs *inside* the virtual environment, so anything that rebuilds the venv — changing `.python-version`, deleting `.venv`, switching interpreters — removes it and you will need to run the command again. The app detects this case and tells you, rather than failing with a traceback.
 
 ## Usage
 
@@ -131,6 +133,7 @@ For a full file-by-file map, a function reference, and design notes, see [CLAUDE
 | --- | --- |
 | "Could not download the Kokoro model" on first launch | The one-time ~355 MB fetch needs internet. Check your connection and reload. |
 | Japanese errors or produces no audio | Run `uv run python -m unidic download` (one-time, ~1 GB). |
+| Japanese worked before and now doesn't | The venv was rebuilt (interpreter change, deleted `.venv`), which removes the UniDic dictionary stored inside it. Re-run `uv run python -m unidic download`. |
 | English or Romance-language voices error on Play | Install the system dependency: `brew install espeak-ng`. |
 | `uv sync` fails to resolve / won't install | You're not on Apple Silicon. MLX requires an Apple Silicon Mac; Intel macOS, Linux, and Windows are unsupported. |
 | Port already in use | `uv run streamlit run streamlit_app.py --server.port 8502` |
