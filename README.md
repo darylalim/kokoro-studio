@@ -68,22 +68,19 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 - macOS with Apple Silicon (M1 or newer)
 - Python 3.12+ — the repo ships a `.python-version` pinning **3.12** (matching CI), so `uv sync` builds the venv on 3.12 even if you have a newer Python installed
 - [uv](https://docs.astral.sh/uv/) — install with `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- [espeak-ng](https://github.com/espeak-ng/espeak-ng)
+
+No system packages are needed: [espeak-ng](https://github.com/espeak-ng/espeak-ng) ships as a prebuilt library inside the `espeakng-loader` wheel, which `uv sync` installs.
 
 ## Installation
 
 ```bash
-# 1. System dependency (via Homebrew)
-brew install espeak-ng
-
-# 2. Python dependencies, then launch
 uv sync
 uv run streamlit run streamlit_app.py
 ```
 
 The app opens at <http://localhost:8501>. On first launch it downloads the model and voices once (~355 MB, shown with a spinner); the model itself also loads on your first Play. After the initial download it runs fully offline. Press `Ctrl+C` in the terminal to stop it.
 
-> **Note:** The spaCy model `en_core_web_sm` (required for English G2P) is installed automatically by `uv sync`.
+> **Note:** Both G2P prerequisites are installed automatically by `uv sync` — the spaCy model `en_core_web_sm` (for English) and the bundled espeak-ng library (for English fallback and the espeak-backed languages). A separate `brew install espeak-ng` is **not** required: `misaki` calls `EspeakWrapper.set_library()` on the wheel's own `libespeak-ng.dylib` at import, so a system install is never consulted.
 
 ### Japanese support (optional)
 
@@ -134,7 +131,7 @@ For a full file-by-file map, a function reference, and design notes, see [CLAUDE
 | "Could not download the Kokoro model" on first launch | The one-time ~355 MB fetch needs internet. Check your connection and reload. |
 | Japanese errors or produces no audio | Run `uv run python -m unidic download` (one-time, ~1 GB). |
 | Japanese worked before and now doesn't | The venv was rebuilt (interpreter change, deleted `.venv`), which removes the UniDic dictionary stored inside it. Re-run `uv run python -m unidic download`. |
-| English or Romance-language voices error on Play | Install the system dependency: `brew install espeak-ng`. |
+| App dies on Play with exit code 1 and no traceback | espeak-ng truncates its data path at ~160 bytes. Move the checkout somewhere shorter so `<venv>/lib/python3.12/site-packages/espeakng_loader/espeak-ng-data` fits, then `uv sync` again. |
 | `uv sync` fails to resolve / won't install | You're not on Apple Silicon. MLX requires an Apple Silicon Mac; Intel macOS, Linux, and Windows are unsupported. |
 | Port already in use | `uv run streamlit run streamlit_app.py --server.port 8502` |
 | Source edits don't auto-reload | The file watcher is disabled (`fileWatcherType = "none"`); restart the app or use the toolbar's **Rerun**. |
@@ -176,6 +173,6 @@ The workflow verifies the tag matches `pyproject.toml`'s `version` before publis
 This app is a thin Streamlit front-end. At runtime it downloads and depends on third-party components under their own licenses:
 
 - **[Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)** by hexgrad — the upstream TTS model (Apache-2.0). At runtime the app downloads the [`mlx-community/Kokoro-82M-bf16`](https://huggingface.co/mlx-community/Kokoro-82M-bf16) MLX conversion (a bf16 derivative, also Apache-2.0); neither is redistributed in this repository.
-- The G2P stack pulls in **espeak-ng** and **phonemizer-fork** (both **GPLv3**) and **num2words** (**LGPL**). These drive phonemization for English *and* the espeak-backed languages (Spanish, French, Hindi, Italian, Brazilian Portuguese), so the GPLv3 exposure is language-agnostic, not English-only. Installing and running the app from source via `uv sync` is unaffected by these terms, but note that a *bundled, redistributed build* (e.g. a Docker image or standalone binary that vendors the GPLv3 dependencies) would be a combined work subject to **GPLv3**. num2words is LGPL, whose weaker terms don't impose GPLv3 on the larger work.
+- The G2P stack pulls in **espeak-ng** and **phonemizer-fork** (both **GPLv3**) and **num2words** (**LGPL**). These drive phonemization for English *and* the espeak-backed languages (Spanish, French, Hindi, Italian, Brazilian Portuguese), so the GPLv3 exposure is language-agnostic, not English-only. Note that espeak-ng arrives as a **prebuilt GPLv3 binary vendored inside the `espeakng-loader` wheel**, not as a separately-installed system package — so `uv sync` places it in your virtualenv either way. Installing and running the app from source is unaffected by these terms, but a *bundled, redistributed build* (e.g. a Docker image or standalone binary) would already be shipping that GPLv3 library and would be a combined work subject to **GPLv3**. num2words is LGPL, whose weaker terms don't impose GPLv3 on the larger work.
 
 Bundled sample texts under `samples/` are public domain.

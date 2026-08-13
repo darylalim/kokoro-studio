@@ -8,7 +8,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 
 ## Installation
 
-Requires `espeak-ng` system dependency.
+No system dependencies. espeak-ng is vendored as a prebuilt library inside the `espeakng-loader` wheel, so `uv sync` is sufficient (see Dependencies).
 
 ```bash
 uv sync --group dev
@@ -28,7 +28,7 @@ Note that changing the pinned version makes the next `uv sync` rebuild the venv,
 - **Unit tests**: `uv run pytest`
 - **Integration tests**: `uv run pytest tests_integration/`
 
-**CI** (`.github/workflows/ci.yml`, merge gate on push to `main` + every PR): runs on `macos-latest` only (mlx/mlx-metal are `darwin`-gated in `uv.lock`), `timeout-minutes: 15`, then `uv sync --locked --group dev` (fails on lockfile drift) → `ruff check .` → `ruff format --check .` → `ty check` → `pytest`. The integration suite is excluded (needs the real modules + the ~355 MB download). Note CI gates on `ruff format --check .`, not the bare `ruff format .` above. Steps omit `name:` so GitHub labels them with the command itself; keep `python-version: "3.12"` in the `setup-uv` block, which `TestPythonVersionConsistency.test_ci_workflow_matches` asserts on.
+**CI** (`.github/workflows/ci.yml`, merge gate on push to `main` + every PR): runs on `macos-latest` only (mlx/mlx-metal are `darwin`-gated in `uv.lock`), `timeout-minutes: 15`, then `uv sync --locked --group dev` (fails on lockfile drift) → `ruff check .` → `ruff format --check .` → `ty check` → `pytest`. The integration suite is excluded (needs the real modules + the ~355 MB download). Note CI gates on `ruff format --check .`, not the bare `ruff format .` above. There is deliberately **no `brew install espeak-ng` step**: `espeakng-loader` vendors the library, the unit suite mocks `misaki` outright, and neither G2P path ever consults a system install — don't re-add it. Steps omit `name:` so GitHub labels them with the command itself; keep `python-version: "3.12"` in the `setup-uv` block, which `TestPythonVersionConsistency.test_ci_workflow_matches` asserts on.
 
 **Releases** (`.github/workflows/release.yml`, tag-triggered): pushing a `vX.Y.Z` tag verifies it matches `pyproject.toml`'s `version` (fails loud on drift), then runs `gh release create --generate-notes` to publish a GitHub Release titled by tag name (notes diffed against the previous release). Flow: bump `version` in `pyproject.toml` (then `uv lock` to sync `uv.lock`), commit, `git push origin main` (CI validates the bump commit — the release job does **not** itself gate on CI), then `git tag -a vX.Y.Z` and push the tag. Final releases only; runs on `ubuntu-latest` (no build/test — that is CI's job).
 
@@ -43,7 +43,7 @@ Note that changing the pinned version makes the next `uv sync` rebuild the venv,
 
 ## Dependencies
 
-**System:** `espeak-ng`
+**System:** none. espeak-ng is *not* a system dependency here — `espeakng-loader` ships a prebuilt `libespeak-ng.dylib` plus `espeak-ng-data` inside the wheel, and `misaki/espeak.py` calls `EspeakWrapper.set_library()` / `set_data_path()` on those at import. `phonemizer`'s `EspeakWrapper.library` resolves lazily and checks its `_ESPEAK_LIBRARY` class attribute *first*, ahead of `$PHONEMIZER_ESPEAK_LIBRARY` and `ctypes.util.find_library('espeak-ng')`, so the system lookup is unreachable once misaki has been imported. This covers the synthesis path too: mlx-audio's `tts/models/kokoro/pipeline.py` imports `misaki.espeak` for `EspeakG2P`/`EspeakFallback` rather than touching phonemizer directly, and nothing in mlx-audio shells out to an `espeak` binary (its only `shutil.which` calls are for `ffmpeg`). Confirmed by running the real, unmocked G2P for English and Spanish on a machine with no `espeak`/`espeak-ng` on `PATH`. A `brew install espeak-ng` therefore changes nothing — don't add it to setup docs or CI.
 
 > **Keep the venv path short.** espeak-ng stores its data directory in a fixed 160-byte `N_PATH_HOME` buffer. If the resolved `espeakng_loader/espeak-ng-data` path exceeds it, the path is truncated, espeak falls back to the build-machine path baked into the wheel (`/Users/runner/work/espeakng-loader/...`), fails to find `phontab`, and calls `exit(1)` directly — the process dies with **exit code 1, no Python traceback, no pytest summary, and buffered output lost**. It reads like a mysterious interpreter-specific crash. To check a given checkout, measure the resolved data directory — `<venv>/lib/pythonX.Y/site-packages/espeakng_loader/espeak-ng-data` — and keep it comfortably under ~159 characters; a `.venv` in the repo root is normally fine, while a venv under a deeply nested CI cache or temp directory may not be. (The 160-byte figure is inferred from the observed truncation boundary, not read from espeak-ng's source, so treat it as approximate.) Since `misaki/espeak.py` calls `EspeakWrapper.set_data_path()` at import time, a later override cannot fix it — espeak is already initialized.
 
