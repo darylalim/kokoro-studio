@@ -26,8 +26,12 @@ jobs:
       # Default depth-1 checkout, only so the guard can read pyproject.toml at
       # the tagged commit. (--generate-notes is computed server-side, so no full
       # history is needed.)
+      # SHA-pinned rather than @v7 because this job runs with `contents: write`
+      # and hands github.token to `gh release create`. A floating major tag is
+      # repointable upstream, so a compromised tag would execute with a
+      # repo-write token here. ci.yml keeps @v7 -- it only has contents: read.
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Guard: the tag must match pyproject's version, so a tag can't drift from
       # the package version (a real risk with manual bumps). Reads the single

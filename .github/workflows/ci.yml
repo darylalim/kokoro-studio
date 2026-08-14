@@ -19,16 +19,28 @@ jobs:
     # mlx / mlx-metal are gated to sys_platform == 'darwin' in uv.lock, so the
     # full dependency set only resolves on Apple Silicon.
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
+      # No system packages are installed on purpose. espeak-ng ships prebuilt
+      # inside the espeakng-loader wheel and misaki points phonemizer straight
+      # at it, so `brew install espeak-ng` changes nothing -- please don't add
+      # one back. TestEspeakVendoring in tests/ guards this.
       - uses: actions/checkout@v7
 
-      # Pinned to a full version on purpose: setup-uv stopped publishing
-      # floating major tags after v7, so `@v10` would not resolve.
+      # setup-uv stopped publishing floating major tags after v7, so this must
+      # carry a full version -- `@v10` does not resolve.
       - uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
+          # setup-uv v9 flipped this default to false, which saves the whole
+          # ~1.9 GB uv cache instead of ~180 MB. Pruning keeps us inside
+          # GitHub's 10 GB per-repo quota, at the cost of uv sync re-fetching
+          # wheels from PyPI rather than reading them back from the cache.
+          prune-cache: true
+          # Pin uv itself so `--locked` is evaluated by the same version used
+          # locally (see .venv/pyvenv.cfg). Bump when the local uv is upgraded.
+          version: "0.11.21"
           python-version: "3.12"
 
       # --locked installs exactly from uv.lock AND fails if the lock has drifted

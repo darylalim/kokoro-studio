@@ -1971,6 +1971,81 @@ class TestPythonVersionConsistency:
         assert f'python-version: "{self.EXPECTED}"' in workflow
 
 
+class TestEspeakVendoring:
+    """CI installs no system packages, which is only correct because espeak-ng
+    ships prebuilt inside the espeakng-loader wheel and `misaki` points
+    phonemizer straight at it. Nothing else in CI would notice if either half
+    stopped being true: the unit suite mocks `misaki` wholesale and
+    tests_integration/ is excluded by `testpaths`. These are the canary."""
+
+    # espeak-ng stores its data dir in a fixed ~160-byte N_PATH_HOME buffer.
+    # Past that the path is silently truncated, espeak falls back to the
+    # build-machine path baked into the wheel, fails to find phontab, and calls
+    # exit(1) directly -- no traceback, no pytest summary. See CLAUDE.md.
+    DATA_PATH_BUDGET: ClassVar[int] = 159
+
+    @staticmethod
+    def _repo_root() -> Path:
+        import streamlit_app
+
+        return Path(streamlit_app.__file__).parent
+
+    def test_library_ships_inside_the_wheel(self) -> None:
+        import espeakng_loader
+
+        lib = Path(espeakng_loader.get_library_path())
+        assert lib.is_file(), (
+            f"espeakng-loader shipped no library at {lib}. Installing a system "
+            "espeak-ng would NOT fix this -- misaki binds phonemizer to this path."
+        )
+
+    def test_data_dir_ships_inside_the_wheel(self) -> None:
+        import espeakng_loader
+
+        data = Path(espeakng_loader.get_data_path())
+        assert data.is_dir()
+        # phontab is precisely the file espeak exit(1)s over when truncated.
+        assert (data / "phontab").is_file()
+
+    def test_data_path_fits_espeak_fixed_buffer(self) -> None:
+        import espeakng_loader
+
+        path = espeakng_loader.get_data_path()
+        assert len(path) <= self.DATA_PATH_BUDGET, (
+            f"espeak data path is {len(path)} chars, over the ~"
+            f"{self.DATA_PATH_BUDGET} budget -- the app will die with exit code 1 "
+            f"and no traceback. Move the checkout somewhere shorter: {path}"
+        )
+
+    def test_misaki_binds_phonemizer_to_the_bundled_library(self) -> None:
+        # conftest replaces `misaki` with a MagicMock, so read the installed
+        # source instead of importing. If a misaki upgrade drops these calls,
+        # phonemizer falls through to ctypes.util.find_library('espeak-ng') and
+        # a system install becomes load-bearing again -- which would silently
+        # invalidate the "no system packages" claim in README and CLAUDE.md.
+        import espeakng_loader
+
+        site_packages = Path(espeakng_loader.__file__).parent.parent
+        src = (site_packages / "misaki" / "espeak.py").read_text(encoding="utf-8")
+        assert "EspeakWrapper.set_library(espeakng_loader.get_library_path())" in src
+        assert "EspeakWrapper.set_data_path(espeakng_loader.get_data_path())" in src
+
+    def test_ci_installs_no_system_packages(self) -> None:
+        # Converts the "don't re-add brew install espeak-ng" decision from
+        # prose into enforcement. If a future change genuinely needs a system
+        # package, updating this test is the deliberate step that requires.
+        workflow = (self._repo_root() / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        # Comments are stripped first: the file explains *why* there is no
+        # `brew install espeak-ng`, so a naive substring check would match its
+        # own documentation.
+        directives = [
+            ln for ln in workflow.splitlines() if not ln.lstrip().startswith("#")
+        ]
+        assert "brew install" not in "\n".join(directives)
+
+
 class TestTokenizeErrorMessage:
     """The Tokenize handler catches G2P failures so they render in place. The
     missing-UniDic case is called out by name because the dictionary lives in
