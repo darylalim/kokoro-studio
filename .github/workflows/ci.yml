@@ -97,11 +97,16 @@ jobs:
       # persist-credentials is explicit rather than left to the default: the tag
       # step pushes over the credentials this step stores, so a future default
       # flip upstream would break the push rather than silently no-op.
-      # Depth 1 is enough -- the tag points at HEAD and --generate-notes is
-      # computed server-side, so no history is needed locally.
+      #
+      # Full history (fetch-depth: 0, which also brings tags) because
+      # release_notes.py reads `git log <previous tag>..<tag>` locally. Depth 1
+      # was enough while notes came from --generate-notes, which is computed
+      # server-side. The repo is a few MB, so the full fetch is not worth
+      # optimising away.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: true
+          fetch-depth: 0
 
       # Reads the single `version = "..."` line with grep/sed -- no Python or
       # tomllib dependency on the runner image. TestReleaseWorkflow mirrors both
@@ -143,10 +148,19 @@ jobs:
             state=absent
           fi
 
+          # Base for the notes range. /releases/latest excludes drafts and
+          # prereleases, so this is the last thing actually published -- the
+          # same base --generate-notes used to diff against. Absent on the very
+          # first release, where release_notes.py falls back to full history.
+          if ! previous="$(gh api "repos/${GH_REPO}/releases/latest" --jq .tag_name 2>/dev/null)"; then
+            previous=""
+          fi
+
           {
             echo "tag=${tag}"
             echo "tag_exists=${tag_exists}"
             echo "state=${state}"
+            echo "previous=${previous}"
           } >> "${GITHUB_OUTPUT}"
 
           if [ "${state}" = "published" ]; then
@@ -172,18 +186,31 @@ jobs:
 
       # Draft first, publish second. A draft is invisible to watchers and sends
       # no notifications, so a failure between these two steps leaves an
-      # inspectable draft rather than a half-formed public release. --generate-notes
-      # is computed server-side by diffing against the previous release, and
+      # inspectable draft rather than a half-formed public release.
       # --verify-tag asserts the tag it needs actually landed above.
+      #
+      # Notes come from release_notes.py, not --generate-notes: the latter
+      # enumerates merged pull requests only, and this repo pushes straight to
+      # main, so it yielded a bare compare link regardless of what shipped. The
+      # script groups conventional-commit subjects instead. Its output is data,
+      # so it goes through a file rather than being interpolated into the
+      # command. TestReleaseNotes covers the parsing and grouping.
       - name: Draft release
         if: steps.plan.outputs.state == 'absent'
         env:
           TAG: ${{ steps.plan.outputs.tag }}
+          PREVIOUS: ${{ steps.plan.outputs.previous }}
         run: |
+          set -euo pipefail
+          python3 release_notes.py \
+            --tag "${TAG}" \
+            --previous "${PREVIOUS}" \
+            --repo "${GH_REPO}" > "${RUNNER_TEMP}/notes.md"
+          cat "${RUNNER_TEMP}/notes.md"
           gh release create "${TAG}" \
             --draft \
             --title "${TAG}" \
-            --generate-notes \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
             --verify-tag
 
       # Clearing the draft flag is what makes it public. GitHub auto-marks the

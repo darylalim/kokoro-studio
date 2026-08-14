@@ -159,14 +159,14 @@ Releases are cut automatically from the version in `pyproject.toml`. There is no
 git push origin main
 ```
 
-When that lands on `main`, the `release` job in `.github/workflows/ci.yml` checks whether a `vX.Y.Z` tag for the new version exists. If not, it creates and pushes an annotated tag, drafts a GitHub Release with notes generated from the commits since the previous release, and publishes it.
+When that lands on `main`, the `release` job in `.github/workflows/ci.yml` checks whether a `vX.Y.Z` tag for the new version exists. If not, it creates and pushes an annotated tag, drafts a GitHub Release, and publishes it.
 
 - **It cannot ship a broken build** — the job `needs` the lint/type-check/test job, so a red tree blocks the release. (The old tag-triggered workflow never consulted CI.)
 - **It's idempotent** — pushes that don't change the version are a no-op, and re-running a run that died between tagging and publishing finishes the job rather than duplicating it.
 - **Final releases only** — the version must be exactly `X.Y.Z`; the job fails loudly on anything else.
 - **To re-cut a release**, delete the GitHub Release and its tag, then re-run the CI run.
 
-
+Release notes are built by `release_notes.py`, which groups commit subjects since the previous release under headings by [conventional-commit](https://www.conventionalcommits.org) type — `feat:` under **Features**, `fix:` under **Bug Fixes**, and so on, with anything marked `!` or carrying a `BREAKING CHANGE:` trailer promoted to the top. Write commit subjects in that form and the notes look after themselves; anything else still appears, verbatim, under **Other Changes**.
 
 </details>
 
