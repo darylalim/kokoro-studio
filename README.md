@@ -147,20 +147,26 @@ uv run pytest                # unit tests
 uv run pytest tests_integration/   # integration tests (opt-in)
 ```
 
-**Contributing & CI.** CI is the merge gate on every push to `main` and every PR (runs on `macos-latest`): `ruff check`, `ruff format --check .`, `ty check`, and the unit test suite. `uv sync --locked` fails on lockfile drift, so re-run `uv lock` after changing dependencies. The integration suite is opt-in (`uv run pytest tests_integration/`) and needs the real ~355 MB download. Heads-up: CI gates on `ruff format --check .`, not the bare `ruff format .` above — format locally before pushing.
+**Contributing & CI.** CI is the merge gate on every push to `main` and every PR (runs on `macos-latest`): `ruff check`, `ruff format --check .`, `ty check`, and the unit test suite. `uv sync --locked` fails on lockfile drift, so re-run `uv lock` after changing dependencies. The integration suite is opt-in (`uv run pytest tests_integration/`) and needs the real ~355 MB download. Heads-up: CI gates on `ruff format --check .`, not the bare `ruff format .` above — format locally before pushing. A second job in the same workflow publishes a release when the version in `pyproject.toml` changes — see **Releasing** below.
 
 <details>
 <summary><strong>Releasing</strong> (maintainers)</summary>
 
-Pushing a `vX.Y.Z` tag publishes a GitHub Release automatically (via `.github/workflows/release.yml`), with notes generated from the commits since the previous release:
+Releases are cut automatically from the version in `pyproject.toml`. There is no tagging step:
 
 ```bash
 # bump `version` in pyproject.toml, then `uv lock`, commit
-git push origin main                          # let CI validate the bump commit
-git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+git push origin main
 ```
 
-The workflow verifies the tag matches `pyproject.toml`'s `version` before publishing. It does **not** wait on CI, so confirm CI is green on the bump commit first.
+When that lands on `main`, the `release` job in `.github/workflows/ci.yml` checks whether a `vX.Y.Z` tag for the new version exists. If not, it creates and pushes an annotated tag, drafts a GitHub Release with notes generated from the commits since the previous release, and publishes it.
+
+- **It cannot ship a broken build** — the job `needs` the lint/type-check/test job, so a red tree blocks the release. (The old tag-triggered workflow never consulted CI.)
+- **It's idempotent** — pushes that don't change the version are a no-op, and re-running a run that died between tagging and publishing finishes the job rather than duplicating it.
+- **Final releases only** — the version must be exactly `X.Y.Z`; the job fails loudly on anything else.
+- **To re-cut a release**, delete the GitHub Release and its tag, then re-run the CI run.
+
+
 
 </details>
 

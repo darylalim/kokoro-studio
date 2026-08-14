@@ -8,10 +8,14 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR) -- but
+# never on main, where the release job below can be mid-publish: killing it
+# could strand a pushed tag with no release behind it. Same group with no
+# cancellation makes main runs queue instead, so a later push always observes
+# the tag an earlier one pushed.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint-typecheck-test:
@@ -53,3 +57,139 @@ jobs:
       # Mocked unit suite only (testpaths = ["tests"]); tests_integration/ needs
       # the real modules plus the ~355 MB model download.
       - run: uv run pytest
+
+  # Auto-release. When a commit lands on main whose pyproject.toml version has no
+  # vX.Y.Z tag yet, tag it, draft a release with generated notes, then publish.
+  #
+  # This lives in the CI workflow rather than a separate tag-triggered one so a
+  # release can only ship from a green tree (`needs:` below). The retired
+  # release.yml fired on a hand-pushed tag and never consulted CI, so a red main
+  # could still be released; TestReleaseWorkflow now fails the build if that file
+  # comes back, since two publish paths for one version is a double-cut hazard.
+  #
+  # Nothing here reads attacker-controllable event data (commit messages, PR
+  # titles, branch names) -- only pyproject.toml at the checked-out commit -- and
+  # values reach the shell through env:, never ${{ }} interpolation.
+  release:
+    name: Tag and publish release
+    # A failed or cancelled check job blocks the release outright.
+    needs: lint-typecheck-test
+    # Pushes to main only: PRs, including fork PRs, never reach this job, so the
+    # write token below is never handed to untrusted code.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Nothing is built or tested here, so the cheap Linux runner is fine.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Job-level permissions replace the workflow default outright, so the write
+    # token is scoped to this job alone -- lint-typecheck-test stays read-only.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      # SHA-pinned rather than @v7 because this job runs with `contents: write`
+      # and hands github.token to `gh`. A floating major tag is repointable
+      # upstream, so a compromised tag would execute with a repo-write token
+      # here. The job above keeps @v7 -- it only has contents: read.
+      #
+      # persist-credentials is explicit rather than left to the default: the tag
+      # step pushes over the credentials this step stores, so a future default
+      # flip upstream would break the push rather than silently no-op.
+      # Depth 1 is enough -- the tag points at HEAD and --generate-notes is
+      # computed server-side, so no history is needed locally.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      # Reads the single `version = "..."` line with grep/sed -- no Python or
+      # tomllib dependency on the runner image. TestReleaseWorkflow mirrors both
+      # this pattern and the X.Y.Z shape, so pyproject can't be reformatted into
+      # something this silently mis-parses.
+      #
+      # "Has the version been bumped?" is answered by asking whether the tag and
+      # release already exist, not by diffing pyproject against the parent
+      # commit. That survives squash merges, multi-commit pushes and re-runs, and
+      # it lets a re-run finish a job that died between tagging and publishing.
+      - id: plan
+        name: Resolve version and release state
+        run: |
+          set -euo pipefail
+
+          version="$(grep -m1 -E '^version = "' pyproject.toml | sed -E 's/^version = "([^"]+)".*/\1/')"
+          if ! printf '%s' "${version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            # Unreachable in practice: TestReleaseWorkflow asserts the same shape
+            # and runs in the job this one needs. Reaching it means that test was
+            # relaxed, which should be loud rather than a silently skipped
+            # release. Final releases only; for prereleases, add PEP 440-aware
+            # normalisation and pass --prerelease when publishing.
+            echo "::error::pyproject version '${version}' is not X.Y.Z; this repo publishes final releases only."
+            exit 1
+          fi
+          tag="v${version}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            tag_exists=true
+          else
+            tag_exists=false
+          fi
+
+          # gh release view finds drafts too, so distinguish them: a leftover
+          # draft from a half-finished run should be published, not skipped as
+          # though it were already out.
+          if ! state="$(gh release view "${tag}" --json isDraft \
+                          --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null)"; then
+            state=absent
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "tag_exists=${tag_exists}"
+            echo "state=${state}"
+          } >> "${GITHUB_OUTPUT}"
+
+          if [ "${state}" = "published" ]; then
+            echo "::notice::${tag} is already released; nothing to do."
+          else
+            echo "::notice::Releasing ${tag} (tag exists: ${tag_exists}, release: ${state})."
+          fi
+
+      # Annotated rather than lightweight, so the tag carries a tagger and date
+      # and `git describe` prefers it. Pushing a tag does not re-trigger this
+      # workflow (it only listens on branch pushes), and GITHUB_TOKEN pushes
+      # never trigger workflow runs anyway -- no loop is possible here.
+      - name: Tag
+        if: steps.plan.outputs.state != 'published' && steps.plan.outputs.tag_exists == 'false'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "refs/tags/${TAG}"
+
+      # Draft first, publish second. A draft is invisible to watchers and sends
+      # no notifications, so a failure between these two steps leaves an
+      # inspectable draft rather than a half-formed public release. --generate-notes
+      # is computed server-side by diffing against the previous release, and
+      # --verify-tag asserts the tag it needs actually landed above.
+      - name: Draft release
+        if: steps.plan.outputs.state == 'absent'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --draft \
+            --title "${TAG}" \
+            --generate-notes \
+            --verify-tag
+
+      # Clearing the draft flag is what makes it public. GitHub auto-marks the
+      # newest published release as "Latest", so --latest would be redundant.
+      - name: Publish release
+        if: steps.plan.outputs.state != 'published'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: gh release edit "${TAG}" --draft=false

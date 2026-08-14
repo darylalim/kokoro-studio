@@ -1873,8 +1873,8 @@ class TestLicensing:
 
 
 class TestReleaseWorkflow:
-    """Guard the assumption the release workflow (.github/workflows/release.yml)
-    relies on when it checks tag/version drift."""
+    """Guard the assumptions the auto-release job in .github/workflows/ci.yml
+    relies on when it turns a pyproject version bump into a published release."""
 
     @staticmethod
     def _repo_root() -> Path:
@@ -1882,18 +1882,52 @@ class TestReleaseWorkflow:
 
         return Path(streamlit_app.__file__).parent
 
-    def test_release_workflow_present(self) -> None:
+    @classmethod
+    def _ci_workflow(cls) -> str:
+        return (cls._repo_root() / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+    @classmethod
+    def _release_job(cls) -> str:
+        # Everything from the `release:` job key onward. It is the last job in the
+        # file, so a plain partition is enough — no YAML parser needed.
+        _, _, job = cls._ci_workflow().partition("\n  release:")
+        assert job, "expected a `release:` job in ci.yml"
+        return job
+
+    @classmethod
+    def _release_job_directives(cls) -> str:
+        # The release job with comment lines removed. Assert against this, never
+        # the raw job: ci.yml explains each of its own policies in prose right
+        # above the line that implements it, so a substring check on the raw text
+        # is satisfied by the explanation whether or not the policy survives.
+        return "\n".join(
+            ln
+            for ln in cls._release_job().splitlines()
+            if not ln.lstrip().startswith("#")
+        )
+
+    def test_release_job_present(self) -> None:
+        assert self._release_job()
+
+    def test_tag_triggered_release_workflow_stays_retired(self) -> None:
+        # release.yml cut a release from a hand-pushed tag without ever consulting
+        # CI. That job now lives in ci.yml gated on the check job; reviving the old
+        # file would give one version two publish paths that could both cut it.
         path = self._repo_root() / ".github" / "workflows" / "release.yml"
-        assert path.is_file()
+        assert not path.exists(), (
+            "release.yml is retired — ci.yml's release job is the only publish path"
+        )
 
     def test_pyproject_version_is_grep_extractable(self) -> None:
         import re
         import tomllib
 
-        # release.yml extracts the version with: grep -m1 -E '^version = "' | sed.
+        # The release job extracts the version with: grep -m1 -E '^version = "' | sed.
         # Guard that pyproject keeps exactly one top-level `version = "X"` line and
         # that the shell-extracted value matches tomllib's parsed value, so the
-        # workflow's drift check stays valid if pyproject is ever reformatted.
+        # workflow's tag derivation stays valid if pyproject is ever reformatted.
         root = self._repo_root()
         lines = (root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
         version_lines = [ln for ln in lines if re.match(r'^version = "', ln)]
@@ -1903,23 +1937,79 @@ class TestReleaseWorkflow:
         with (root / "pyproject.toml").open("rb") as f:
             parsed = tomllib.load(f)["project"]["version"]
         assert match.group(1) == parsed
-        # The release trigger fires only on `v[0-9]+.[0-9]+.[0-9]+` tags, so the
-        # version must be exactly X.Y.Z — a 2-segment or PEP 440 prerelease such as
-        # "1.0.0rc1" would pass extraction yet push a tag that never fires release.yml.
+        # The version becomes the tag verbatim, and the repo publishes final
+        # releases only, so it must be exactly X.Y.Z — a 2-segment or PEP 440
+        # prerelease such as "1.0.0rc1" would extract fine and then fail the
+        # release job's own shape check.
         assert re.fullmatch(r"\d+\.\d+\.\d+", parsed), (
-            "version must be X.Y.Z so a vX.Y.Z tag matches release.yml's trigger"
+            "version must be X.Y.Z — the release job errors on any other shape"
         )
 
-    def test_release_workflow_mirrors_version_guard(self) -> None:
-        # Bind this test file to release.yml so the two version guards can't drift
-        # apart: if the workflow's grep pattern or trigger glob changes, the
+    def test_release_job_mirrors_version_guard(self) -> None:
+        # Bind this test file to the workflow so the two version guards can't drift
+        # apart: if the workflow's grep pattern or X.Y.Z check changes, the
         # pyproject-side check above silently stops mirroring it — fail loudly here.
-        workflow = (
-            self._repo_root() / ".github" / "workflows" / "release.yml"
-        ).read_text(encoding="utf-8")
-        assert "grep -m1 -E '^version = \"'" in workflow
-        assert "v[0-9]+.[0-9]+.[0-9]+" in workflow
-        assert "contents: write" in workflow
+        job = self._release_job()
+        assert "grep -m1 -E '^version = \"'" in job
+        assert "^[0-9]+\\.[0-9]+\\.[0-9]+$" in job
+        # Comment-stripped: the checkout step's comment says "this job runs with
+        # `contents: write`", which satisfies a raw substring check on its own.
+        # Without stripping, deleting the permissions block -- or hoisting it to
+        # the workflow level, handing a repo-write token to the job that runs
+        # third-party code via `uv sync` -- passes this test unnoticed.
+        assert "contents: write" in self._release_job_directives(), (
+            "the write token must be granted on the release job, not workflow-wide"
+        )
+
+    def test_release_is_gated_on_the_check_job_and_main(self) -> None:
+        # The reason the release lives in ci.yml at all: a red tree cannot ship,
+        # and a fork PR never reaches the job holding the write token.
+        job = self._release_job()
+        assert "needs: lint-typecheck-test" in job
+        assert "github.event_name == 'push'" in job
+        assert "github.ref == 'refs/heads/main'" in job
+
+    def test_release_job_checkout_is_sha_pinned(self) -> None:
+        # Repo policy: a job holding `contents: write` pins actions/checkout to a
+        # SHA, because a floating major tag is repointable upstream and would then
+        # execute with a repo-write token. The read-only check job keeps @v7.
+        # Comments are stripped first so the note explaining the policy can't
+        # satisfy the check on its own.
+        import re
+
+        assert re.search(
+            r"actions/checkout@[0-9a-f]{40}\b", self._release_job_directives()
+        ), "a job with contents: write must pin actions/checkout to a full SHA"
+
+    def test_release_is_drafted_before_it_is_published(self) -> None:
+        # Draft-then-publish is deliberate: a draft is invisible to watchers and
+        # notifies nobody, so the release only goes public once `gh release create`
+        # has returned and the tag it verified is known to exist.
+        import re
+
+        directives = self._release_job_directives()
+        create = directives.index("gh release create")
+        edit = directives.index("gh release edit")
+        assert create < edit, "the release must be created before it is published"
+        # `--draft` has to be a bare flag on `gh release create`. A plain
+        # `"--draft" in job` is also satisfied by the publish step's
+        # `--draft=false`, so it cannot detect the flag being dropped from the
+        # create -- which would publish the release the instant it is created,
+        # silently, since `gh release edit --draft=false` then exits 0 as a no-op.
+        assert re.search(r"--draft(?![=\w])", directives[create:edit]), (
+            "gh release create must pass a bare --draft"
+        )
+        assert "--draft=false" in directives[edit:], (
+            "gh release edit must clear the draft flag to publish"
+        )
+
+    def test_main_runs_are_never_cancelled_mid_publish(self) -> None:
+        # cancel-in-progress must stay off for main: cancelling a run between the
+        # tag push and the publish would strand a tag with no release behind it.
+        assert (
+            "cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}"
+            in self._ci_workflow()
+        )
 
 
 class TestPythonVersionConsistency:

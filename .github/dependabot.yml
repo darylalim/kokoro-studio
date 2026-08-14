@@ -2,8 +2,8 @@ version: 2
 
 updates:
   # Neither action pin refreshes on its own: setup-uv stopped publishing
-  # floating major tags after v7, and release.yml is SHA-pinned because it runs
-  # with `contents: write`. Dependabot is what keeps both current.
+  # floating major tags after v7, and ci.yml's release job SHA-pins its checkout
+  # because it runs with `contents: write`. Dependabot keeps both current.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
