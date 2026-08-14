@@ -12,8 +12,7 @@
 Streamlit application for generating multilingual speech using [Hexgrad Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
 <p align="center">
-  <img src="assets/screenshot-light.png" width="49%" alt="Kokoro Studio in light theme — language selector and text input beside a grade-sorted column of voice cards">
-  <img src="assets/screenshot-dark.png" width="49%" alt="Kokoro Studio in dark theme — the same layout in dark mode">
+  <img src="assets/screenshot-dark.png" width="100%" alt="Kokoro Studio in dark theme — a Gatsby excerpt in the text area with its phoneme tokens expanded below, beside a grade-sorted column of voice cards whose top card has finished generating and shows an audio player and a download button">
 </p>
 
 ## Why Kokoro Studio
