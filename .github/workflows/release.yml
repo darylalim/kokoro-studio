@@ -27,7 +27,7 @@ jobs:
       # the tagged commit. (--generate-notes is computed server-side, so no full
       # history is needed.)
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Guard: the tag must match pyproject's version, so a tag can't drift from
       # the package version (a real risk with manual bumps). Reads the single
