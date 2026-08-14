@@ -1,34 +1,12 @@
 [server]
 fileWatcherType = "none"
 
-# Kokoro Studio — "Kokoro indigo" theme. Shared values live in [theme]; the
-# light and dark blocks define both modes so the toolbar mode toggle is shown.
-[theme]
-# indigo-600: white button text clears WCAG AA contrast (6.29:1)
-primaryColor = "#4F46E5"
-baseRadius = "8px"
-linkUnderline = false
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-# h1 (the page title) extrabold at 800 — heavier than Streamlit's 700 default — for
-# a more distinct title; h2–h6 keep the 600 default. Headings already use the body
-# Inter, so no separate headingFont is needed.
-headingFontWeights = [800, 600, 600, 600, 600, 600]
-codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+[browser]
+# Streamlit's frontend posts session telemetry to data.streamlit.io unless this
+# is off, and the option defaults to true. README promises no network calls
+# after the one-time model download; this key is what makes that promise true.
+gatherUsageStats = false
 
-[theme.light]
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f6f8fa"
-textColor = "#1f2328"
-borderColor = "#d0d7de"
-redColor = "#cf222e"
-orangeColor = "#bf8700"
-greenColor = "#1a7f37"
-
-[theme.dark]
-backgroundColor = "#0d1117"
-secondaryBackgroundColor = "#161b22"
-textColor = "#e6edf3"
-borderColor = "#30363d"
-redColor = "#ff7b72"
-orangeColor = "#e3b341"
-greenColor = "#3fb950"
+# No [theme] section on purpose — the app renders in Streamlit's stock light and
+# dark themes. TestStreamlitConfig holds the rationale and guards every setting
+# in this file.

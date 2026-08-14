@@ -1732,58 +1732,58 @@ class TestNextAudioSeq:
         assert _next_audio_seq() == 3
 
 
-class TestThemeConfig:
-    """Guard the shipped .streamlit/config.toml theme: a malformed file or a
-    missing mode block breaks app startup or the light/dark toggle."""
+class TestStreamlitConfig:
+    """Guard the shipped .streamlit/config.toml — both the disabled file watcher
+    and the deliberately absent [theme] section. This docstring is the one
+    authoritative statement of the theming decision; config.toml and CLAUDE.md
+    point here rather than restating it."""
 
     @staticmethod
-    def _load_theme() -> dict[str, Any]:
-        import tomllib
-
+    def _repo_root() -> Path:
         import streamlit_app
 
-        path = Path(streamlit_app.__file__).parent / ".streamlit" / "config.toml"
+        return Path(streamlit_app.__file__).parent
+
+    def _load_config(self) -> dict[str, Any]:
+        import tomllib
+
+        path = self._repo_root() / ".streamlit" / "config.toml"
         assert path.exists(), f"missing: {path}"
         with path.open("rb") as f:
-            config = tomllib.load(f)
-        assert "theme" in config, "config.toml has no [theme] section"
-        return config["theme"]
+            return tomllib.load(f)
 
-    def test_defines_primary_color(self) -> None:
-        theme = self._load_theme()
-        assert str(theme.get("primaryColor", "")).startswith("#")
+    def test_file_watcher_stays_disabled(self) -> None:
+        # README's troubleshooting table tells users edits don't auto-reload
+        # because of this; it is a server setting, not a theme one.
+        config = self._load_config()
+        assert config.get("server", {}).get("fileWatcherType") == "none"
 
-    def test_defines_both_light_and_dark_modes(self) -> None:
-        # Both blocks must exist for the toolbar light/dark toggle to appear.
-        theme = self._load_theme()
-        assert "light" in theme
-        assert "dark" in theme
+    def test_usage_stats_stay_off(self) -> None:
+        # Streamlit's frontend posts session telemetry to data.streamlit.io
+        # unless this is false, and the option defaults to true — so the key
+        # must be present, not merely absent. README's "no network calls" line
+        # and the "Runs offline" badge are false without it.
+        config = self._load_config()
+        assert config.get("browser", {}).get("gatherUsageStats") is False
 
-    def test_each_mode_defines_background_and_text(self) -> None:
-        theme = self._load_theme()
-        for mode in ("light", "dark"):
-            block = theme[mode]
-            assert str(block.get("backgroundColor", "")).startswith("#")
-            assert str(block.get("textColor", "")).startswith("#")
-
-    def test_each_mode_defines_caption_band_colors(self) -> None:
-        # _render_length_caption emits :red[]/:orange[]/:green[] text, so both
-        # modes must define those semantic colors.
-        theme = self._load_theme()
-        for mode in ("light", "dark"):
-            block = theme[mode]
-            for band in ("redColor", "orangeColor", "greenColor"):
-                assert band in block, f"{mode} mode missing {band}"
-
-    def test_h1_heading_is_extrabold(self) -> None:
-        # Guard the deliberate refinement: h1 must be heavier than Streamlit's
-        # default heading weight (700) — a [700, ...] list would be a silent no-op —
-        # and the weight must actually be loaded in the body font to render.
-        theme = self._load_theme()
-        weights = theme.get("headingFontWeights")
-        assert isinstance(weights, list) and len(weights) == 6
-        assert weights[0] >= 800, "h1 should be extrabold, not the 700 default"
-        assert "800" in str(theme.get("font", "")), "body font must load weight 800"
+    def test_ships_no_custom_theme(self) -> None:
+        # The app renders in Streamlit's stock light and dark themes, whose
+        # defaults already supply both modes, the toolbar toggle, and the
+        # per-mode red/orange/green that _render_length_caption's bands use.
+        #
+        # This asserts absence deliberately, in the same spirit as
+        # TestReleaseWorkflow.test_tag_triggered_release_workflow_stays_retired:
+        # the decision is that no theme ships, and a *partial* theme is the way
+        # that decision breaks silently — Streamlit keeps the light/dark toggle
+        # only when a custom theme defines both [theme.light] and [theme.dark],
+        # so a bare [theme] block pins the app to one mode with no error. Any
+        # deliberate return to theming updates this test, README's feature list,
+        # and CLAUDE.md's Configuration section together.
+        config = self._load_config()
+        assert "theme" not in config, (
+            "config.toml defines a custom [theme]; the app is meant to render "
+            "in Streamlit's default light and dark themes"
+        )
 
 
 class TestProjectMetadata:
