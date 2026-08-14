@@ -131,7 +131,7 @@ For a full file-by-file map, a function reference, and design notes, see [CLAUDE
 | "Could not download the Kokoro model" on first launch | The one-time ~355 MB fetch needs internet. Check your connection and reload. |
 | Japanese errors or produces no audio | Run `uv run python -m unidic download` (one-time, ~1 GB). |
 | Japanese worked before and now doesn't | The venv was rebuilt (interpreter change, deleted `.venv`), which removes the UniDic dictionary stored inside it. Re-run `uv run python -m unidic download`. |
-| App dies on Play with exit code 1 and no traceback | espeak-ng truncates its data path at ~160 bytes. Move the checkout somewhere shorter so `<venv>/lib/python3.12/site-packages/espeakng_loader/espeak-ng-data` fits, then `uv sync` again. |
+| App dies on Play with exit code 1 and no traceback | espeak-ng truncates its data path at ~160 bytes. Move the checkout somewhere shorter, then rebuild the venv with `rm -rf .venv && uv sync`. A plain `uv sync` will **not** fix it — the console scripts keep an absolute shebang pointing at the old location, so you get a confusing "bad interpreter" error instead. Rebuilding also wipes UniDic, so re-run the Japanese download if you use it. |
 | `uv sync` fails to resolve / won't install | You're not on Apple Silicon. MLX requires an Apple Silicon Mac; Intel macOS, Linux, and Windows are unsupported. |
 | Port already in use | `uv run streamlit run streamlit_app.py --server.port 8502` |
 | Source edits don't auto-reload | The file watcher is disabled (`fileWatcherType = "none"`); restart the app or use the toolbar's **Rerun**. |
