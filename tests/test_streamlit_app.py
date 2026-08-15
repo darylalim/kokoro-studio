@@ -768,10 +768,14 @@ class TestRenderVoiceCard:
 
     def test_renders_bordered_container(self) -> None:
         # Opened inside the fragment, not passed in: a shared container would
-        # make every card one fragment instance.
+        # make every card one fragment instance. assert_any_call, not
+        # assert_called_once_with: the card also opens a second, borderless
+        # container reserving the title slot (see test_badge_appears_on_the_run
+        # _that_generates), so pinning the count here would fail for a reason
+        # that has nothing to do with what this test is about.
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.container.assert_called_once_with(border=True)  # ty: ignore[unresolved-attribute]
+        st.container.assert_any_call(border=True)  # ty: ignore[unresolved-attribute]
 
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
@@ -1068,6 +1072,26 @@ class TestRenderVoiceCard:
         expected_key = _cache_key("af_heart", "hello", 1.0, "a")
         assert st.session_state[expected_key] is fake_result
         del st.session_state[expected_key]
+
+    def test_badge_appears_on_the_run_that_generates(self) -> None:
+        # The title is written into a reserved slot after the Play handler
+        # precisely so this holds. Emitted in place, the badge was computed
+        # before generation, which left the one card that had just produced a
+        # clip as the only card without a badge until some unrelated rerun
+        # corrected it. Move the title write back above `if play_clicked:` and
+        # this fails.
+        self._reset_mocks()
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        fake_result = {"wav": _WAV, "voice": "af_heart"}
+        with (
+            patch("streamlit_app.load_pipeline"),
+            patch("streamlit_app.generate_one", return_value=fake_result),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+        st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
+            "**Heart (female) — A** :green-badge[Cached]"
+        )
+        del st.session_state[_cache_key("af_heart", "hello", 1.0, "a")]
 
     def test_click_handles_generate_error(self) -> None:
         self._reset_mocks()

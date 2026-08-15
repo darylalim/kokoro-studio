@@ -465,17 +465,16 @@ def generate_one(
 @st.fragment
 def render_voice_card(voice: str, text: str, lang_code: str) -> None:
     with st.container(border=True):
+        # The title is reserved here and written at the end of the fragment. Its
+        # badge depends on whether this card has audio, and on the run that
+        # generates some, it does not yet — so emitting the title in place left
+        # the one card that had just produced a clip as the only card without a
+        # badge, until some unrelated rerun corrected it. `st.container`, not
+        # `st.empty`: a placeholder clears at the top of each rerun, which would
+        # unmount and remount the title on every fragment run.
+        title_slot = st.container()
         stale_key = _stale_cached_key(voice, text, lang_code)
         cached = st.session_state[stale_key] if stale_key is not None else None
-        # Appended, not prefixed: an icon in front shifted the voice name right by
-        # its own width the moment a card had audio, so a stacked column of six
-        # cards lost its left edge during exactly the A/B comparison the cache
-        # exists for. A badge also names the state rather than leaving a bare
-        # speaker glyph to be guessed at. "Cached", not "Ready": it fires when
-        # audio exists at *any* speed, including the case where the body below
-        # reads "speed changed".
-        badge = " :green-badge[Cached]" if cached is not None else ""
-        st.markdown(f"**{_format_voice(voice)}**{badge}")
         # Columns, not st.container(horizontal=True). A horizontal container
         # sizes children from their intrinsic width (`flex: 1 1 fit-content`),
         # which measured 358 px of selectbox against 306 px of button in a 680 px
@@ -542,6 +541,20 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 # Last-resort UI guard: any failure in one card must not take
                 # down the sibling cards, so it is surfaced in-place instead.
                 st.exception(e)
+        # Written into the slot reserved above, so it renders in title position
+        # while being computed after the Play handler — `key in st.session_state`
+        # only becomes true once this run's generation has stored a clip.
+        # Appended, not prefixed: an icon in front shifted the voice name right by
+        # its own width the moment a card had audio, so a stacked column of six
+        # cards lost its left edge during exactly the A/B comparison the cache
+        # exists for. A badge also names the state rather than leaving a bare
+        # speaker glyph to be guessed at. "Cached", not "Ready": it fires when
+        # audio exists at *any* speed, including the case where the body below
+        # reads "speed changed".
+        has_audio = cached is not None or key in st.session_state
+        badge = " :green-badge[Cached]" if has_audio else ""
+        with title_slot:
+            st.markdown(f"**{_format_voice(voice)}**{badge}")
         if key in st.session_state:
             wav = st.session_state[key]["wav"]
             st.audio(wav, format="audio/wav")
