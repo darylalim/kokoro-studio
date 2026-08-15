@@ -7,7 +7,7 @@ app, then run this through `uvx`:
     uv run streamlit run streamlit_app.py --server.headless true &
     uvx --with playwright python scripts/capture_screenshot.py
 
-This is a script rather than a paragraph of instructions because all six ways
+This is a script rather than a paragraph of instructions because all seven ways
 it goes wrong produce a *plausible but wrong image* instead of an error:
 
 * `embed_options=dark_theme` is a no-op, so dark mode is forced by emulating the
@@ -28,6 +28,12 @@ it goes wrong produce a *plausible but wrong image* instead of an error:
   ("275 phonemes — ideal"), which the sample text alone renders. The wait was a
   no-op and only a 1.2s sleep stood between a cold G2P load and a shot with the
   expander empty. Wait on the expander's own label instead.
+* `crop_height` measures content, but a non-full-page screenshot cannot clip
+  past the viewport: once the page grows taller than `HEIGHT`, Playwright
+  silently returns a shot cut off at `HEIGHT` rather than erroring. Adding one
+  element to either column was enough to get within 20px of that. `crop_height`
+  now raises instead, so the failure is loud and `HEIGHT` is the one number to
+  raise when the layout legitimately grows.
 
 `embed=true` drops the Deploy/⋮ toolbar; `show_padding` restores the top margin
 that embed mode strips.
@@ -47,7 +53,10 @@ OUTPUT = REPO_ROOT / "assets" / "screenshot-dark.png"
 
 URL = "http://localhost:8501/?embed=true&embed_options=show_padding"
 WIDTH = 1600
-HEIGHT = 1400
+# The crop ceiling, not just the window: a non-full-page screenshot cannot clip
+# past the viewport, so this must stay comfortably above whatever `crop_height`
+# measures. Raise it when the layout grows — `crop_height` raises if it doesn't.
+HEIGHT = 1800
 SCALE = 2
 
 # Cropping anchors: the bottom-most real element in each column.
@@ -96,11 +105,11 @@ def drive(page: Page) -> None:
     page.wait_for_selector("audio", timeout=GENERATION_TIMEOUT_MS)
     page.wait_for_timeout(3_000)
 
-    # Match the error variants, not `stAlert`: the pronunciation note is an
-    # st.info and so is an stAlert itself, which would abort every capture.
-    # Streamlit suffixes the *content* testid with the severity
-    # (stAlertContentInfo / stAlertContentError) and leaves the outer stAlert
-    # container severity-agnostic; st.exception renders stException instead.
+    # Match the error variants, not `stAlert`: Streamlit suffixes the *content*
+    # testid with the severity (stAlertContentInfo / stAlertContentError) and
+    # leaves the outer stAlert container severity-agnostic, so `stAlert` would
+    # match any non-error alert the page happens to render and abort a perfectly
+    # good capture. st.exception renders stException instead.
     failures = page.locator(
         '[data-testid="stAlertContentError"], [data-testid="stException"]'
     ).all_inner_texts()
@@ -127,7 +136,14 @@ def crop_height(page: Page) -> int:
         if box is None:
             raise RuntimeError(f"crop anchor not found, UI changed?: {anchor!r}")
         bottoms.append(box["y"] + box["height"])
-    return round(max(bottoms) + CROP_MARGIN)
+    height = round(max(bottoms) + CROP_MARGIN)
+    if height > HEIGHT:
+        raise RuntimeError(
+            f"content is {height}px tall but the viewport is {HEIGHT}px; a "
+            "non-full-page screenshot clips to the viewport, so this would have "
+            f"shipped a hero cut off at {HEIGHT}px with no error. Raise HEIGHT."
+        )
+    return height
 
 
 def optimise(path: Path) -> None:
