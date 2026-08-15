@@ -24,6 +24,23 @@ def _voice_titles(at: AppTest) -> list[str]:
     ]
 
 
+def _set_expander(at: AppTest, is_open: bool) -> None:
+    """Open or close "Show all voices" the way a real click would.
+
+    The expander is keyed, so it carries widget state, and the app mirrors that
+    into a plain key to survive runs that never draw it. A click updates both;
+    setting only the widget key leaves the mirror disagreeing, and the mirror is
+    what feeds `expanded`.
+    """
+    at.session_state["show_all_voices"] = is_open
+    at.session_state["_show_all_voices_pref"] = is_open
+
+
+def _speed_keys(at: AppTest) -> set[str]:
+    """Keys of the per-card speed selectboxes this run actually drew."""
+    return {s.key for s in at.selectbox if s.key and s.key.startswith("speed_")}
+
+
 class TestInitialRender:
     def test_has_no_exception(self) -> None:
         at = _run_app()
@@ -48,6 +65,21 @@ class TestInitialRender:
         play_buttons = [b for b in at.button if b.label == "Play"]
         assert play_buttons
         assert all(b.disabled for b in play_buttons)
+
+
+class TestPronunciationNote:
+    def test_note_is_not_an_alert(self) -> None:
+        # st.info renders role="status" -- an ARIA live region -- which asks a
+        # screen reader to announce permanent reference text as a status update.
+        at = _run_app()
+        assert not at.info
+
+    def test_note_renders_once_with_the_pronunciation_syntax(self) -> None:
+        at = _run_app()
+        bodies = [
+            m.value for m in at.markdown if "[word](/phonemes/)" in (m.value or "")
+        ]
+        assert len(bodies) == 1
 
 
 class TestSampleButtons:
@@ -113,8 +145,10 @@ class TestLanguageSwitching:
 class TestVoiceCards:
     def test_each_visible_voice_has_speed_selectbox_default_1x(self) -> None:
         at = _run_app()
-        # American English voices, best grade first.
-        for voice in ("af_heart", "af_bella", "am_adam"):
+        # Top-grade American English voices, all inside the visible top 6.
+        # (am_adam used to pass here only because the expander rendered its whole
+        # body while collapsed; it is a tail voice and is no longer drawn.)
+        for voice in ("af_heart", "af_bella", "af_nicole"):
             assert at.selectbox(key=f"speed_{voice}").value == 1.0
 
     def test_changing_card_speed_reruns_cleanly(self) -> None:
@@ -125,6 +159,68 @@ class TestVoiceCards:
         at.selectbox(key="speed_af_heart").select(1.5).run()
         assert not at.exception
         assert at.selectbox(key="speed_af_heart").value == 1.5
+
+    def test_collapsed_expander_does_not_build_the_tail_voice_cards(self) -> None:
+        # "Show all voices" is lazy (on_change="rerun" + .open). Left at the
+        # default an expander computes its body while collapsed, which for
+        # American English's 20 voices meant 14 surplus cards — each a
+        # session_state scan and three widgets — on every rerun.
+        at = _run_app()
+        # Setting on_change makes the expander a widget rather than a plain
+        # block, so it lands in session_state and NOT in at.expander. Reading it
+        # here is what pins the lazy behaviour: no key means no `.open` gating.
+        assert at.session_state["show_all_voices"] is False
+        assert len(_voice_titles(at)) == 6
+        assert len([b for b in at.button if b.label == "Play"]) == 6
+
+    def test_opening_the_expander_reveals_the_remaining_voices(self) -> None:
+        at = _run_app()
+        _set_expander(at, True)
+        at.run()
+        assert not at.exception
+        assert len(_voice_titles(at)) > 6
+
+    def test_expander_stays_open_across_a_language_with_no_hidden_voices(self) -> None:
+        # Keying the expander turned its open state into ordinary widget state,
+        # which Streamlit collects on any run that does not draw it. Japanese has
+        # five voices, so `hidden` is empty, the expander is never created, and
+        # `show_all_voices` disappears — English then came back collapsed. The
+        # plain `_show_all_voices_pref` mirror is what survives that round trip.
+        at = _run_app()
+        _set_expander(at, True)
+        at.run()
+        opened = len([b for b in at.button if b.label == "Play"])
+        assert opened > 6
+
+        at.selectbox(key="language").select("Japanese").run()
+        assert "show_all_voices" not in at.session_state
+
+        at.selectbox(key="language").select("American English").run()
+        assert len([b for b in at.button if b.label == "Play"]) == opened
+
+    def test_tail_voice_speed_survives_collapse_and_reopen(self) -> None:
+        # Streamlit discards the state of any widget a run did not draw, so
+        # collapsing the expander drops `speed_{voice}` for every tail card.
+        # Without persist_state="session" the choice snapped back to 1.0x on
+        # reopen — and because _cache_key includes the speed, that also demoted
+        # the voice's generated clip to a "speed changed" stale preview.
+        at = _run_app()
+        visible = _speed_keys(at)
+        _set_expander(at, True)
+        at.run()
+        tail = sorted(_speed_keys(at) - visible)
+        assert tail, "expected voices behind the expander"
+        voice_key = tail[0]
+
+        _set_expander(at, True)
+        at.selectbox(key=voice_key).select(1.3).run()
+        assert at.selectbox(key=voice_key).value == 1.3
+
+        _set_expander(at, False)
+        at.run()
+        _set_expander(at, True)
+        at.run()
+        assert at.selectbox(key=voice_key).value == 1.3
 
     def test_play_buttons_enabled_after_typing(self) -> None:
         at = _run_app()

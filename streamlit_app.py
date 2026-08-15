@@ -16,14 +16,32 @@ from voice_grades import VOICE_GRADES, _grade_rank
 
 
 class VoiceResult(TypedDict):
-    audio: np.ndarray
+    """A generated clip, cached as encoded WAV rather than as samples.
+
+    Both consumers — the inline player and the Download button — want bytes, and
+    `st.audio` re-encodes a float32 array on *every* render (it copies to float64,
+    converts to int16, writes a WAV and hashes it). Encoding once at generation
+    keeps that off every rerun, and int16 WAV is smaller than the float32 array
+    it replaces, so the cache holds `AUDIO_CACHE_LIMIT` clips in less memory.
+    """
+
+    wav: bytes
     voice: str
     phonemes: str
     seq: NotRequired[int]
 
 
 class SampleButton(NamedTuple):
+    """One sample-text button. `icon` is passed to st.button's own `icon=`.
+
+    Keeping the emoji out of `label` is what leaves the label pure text for
+    screen readers; concatenating the two made the icon part of the accessible
+    name. Emoji rather than Material Symbols here on purpose — 📕/📗 tell the two
+    literary excerpts apart by colour, which a monochrome symbol cannot.
+    """
+
     label: str
+    icon: str
     filename: str
     is_random: bool
 
@@ -81,49 +99,49 @@ _PHONEME_MULTIPLIERS: dict[str, float] = {
 
 SAMPLE_BUTTONS: dict[str, list[SampleButton]] = {
     "a": [
-        SampleButton("🎲 Random Quote", "random.txt", True),
-        SampleButton("📕 Gatsby", "gatsby.txt", False),
-        SampleButton("📗 Frankenstein", "frankenstein.txt", False),
+        SampleButton("Random quote", "🎲", "random.txt", True),
+        SampleButton("Gatsby", "📕", "gatsby.txt", False),
+        SampleButton("Frankenstein", "📗", "frankenstein.txt", False),
     ],
     "b": [
-        SampleButton("🎲 Random Quote", "random.txt", True),
-        SampleButton("📕 Pride & Prejudice", "pride.txt", False),
-        SampleButton("📗 Sherlock Holmes", "sherlock.txt", False),
+        SampleButton("Random quote", "🎲", "random.txt", True),
+        SampleButton("Pride & Prejudice", "📕", "pride.txt", False),
+        SampleButton("Sherlock Holmes", "📗", "sherlock.txt", False),
     ],
     "e": [
-        SampleButton("🎲 Cita Aleatoria", "random.txt", True),
-        SampleButton("📕 Don Quijote", "quijote.txt", False),
-        SampleButton("📗 Bécquer", "becquer.txt", False),
+        SampleButton("Cita aleatoria", "🎲", "random.txt", True),
+        SampleButton("Don Quijote", "📕", "quijote.txt", False),
+        SampleButton("Bécquer", "📗", "becquer.txt", False),
     ],
     "f": [
-        SampleButton("🎲 Citation", "random.txt", True),
-        SampleButton("📕 Misérables", "miserables.txt", False),
-        SampleButton("📗 Candide", "candide.txt", False),
+        SampleButton("Citation", "🎲", "random.txt", True),
+        SampleButton("Misérables", "📕", "miserables.txt", False),
+        SampleButton("Candide", "📗", "candide.txt", False),
     ],
     "h": [
-        SampleButton("🎲 लोकोक्ति", "random.txt", True),
-        SampleButton("📕 कबीर", "kabir.txt", False),
-        SampleButton("📗 रहीम", "rahim.txt", False),
+        SampleButton("लोकोक्ति", "🎲", "random.txt", True),
+        SampleButton("कबीर", "📕", "kabir.txt", False),
+        SampleButton("रहीम", "📗", "rahim.txt", False),
     ],
     "i": [
-        SampleButton("🎲 Citazione", "random.txt", True),
-        SampleButton("📕 Divina Commedia", "divina.txt", False),
-        SampleButton("📗 Promessi Sposi", "promessi.txt", False),
+        SampleButton("Citazione", "🎲", "random.txt", True),
+        SampleButton("Divina Commedia", "📕", "divina.txt", False),
+        SampleButton("Promessi Sposi", "📗", "promessi.txt", False),
     ],
     "j": [
-        SampleButton("🎲 ことわざ", "random.txt", True),
-        SampleButton("📕 こころ", "kokoro.txt", False),
-        SampleButton("📗 坊っちゃん", "botchan.txt", False),
+        SampleButton("ことわざ", "🎲", "random.txt", True),
+        SampleButton("こころ", "📕", "kokoro.txt", False),
+        SampleButton("坊っちゃん", "📗", "botchan.txt", False),
     ],
     "p": [
-        SampleButton("🎲 Citação", "random.txt", True),
-        SampleButton("📕 Brás Cubas", "bras_cubas.txt", False),
-        SampleButton("📗 Iracema", "iracema.txt", False),
+        SampleButton("Citação", "🎲", "random.txt", True),
+        SampleButton("Brás Cubas", "📕", "bras_cubas.txt", False),
+        SampleButton("Iracema", "📗", "iracema.txt", False),
     ],
     "z": [
-        SampleButton("🎲 古语", "random.txt", True),
-        SampleButton("📕 唐诗", "tangshi.txt", False),
-        SampleButton("📗 论语", "lunyu.txt", False),
+        SampleButton("古语", "🎲", "random.txt", True),
+        SampleButton("唐诗", "📕", "tangshi.txt", False),
+        SampleButton("论语", "📗", "lunyu.txt", False),
     ],
 }
 
@@ -303,15 +321,21 @@ def _render_sample_buttons(lang_code: str) -> None:
     buttons = SAMPLE_BUTTONS.get(lang_code, [])
     if not buttons:
         return
+    # Columns, not st.container(horizontal=True). The 1.61 guidance prefers a
+    # horizontal container for a button row, but its children get
+    # `flex: 1 1 fit-content` and so grow from their own text width: measured
+    # 246/200/235 px against 227 for an even third, a 23% spread that tracks
+    # label length. Columns give exact thirds, which is what this row wants.
     cols = st.columns(len(buttons))
-    for col, (label, filename, is_random) in zip(cols, buttons):
+    for col, entry in zip(cols, buttons):
         with col:
             st.button(
-                label,
-                key=f"sample_{lang_code}_{Path(filename).stem}",
+                entry.label,
+                icon=entry.icon,
+                key=f"sample_{lang_code}_{Path(entry.filename).stem}",
                 width="stretch",
                 on_click=_set_text_from_sample,
-                args=(lang_code, filename, is_random),
+                args=(lang_code, entry.filename, entry.is_random),
             )
 
 
@@ -351,13 +375,24 @@ def _evict_old_audio(protect: frozenset[str] = frozenset()) -> None:
     overflow = len(audio_keys) - AUDIO_CACHE_LIMIT
     if overflow <= 0:
         return
+    # Drop the oldest by generation order (lowest seq); never trust iteration order.
+    by_age = sorted(audio_keys, key=lambda k: st.session_state[k].get("seq", 0))
     # `protect` shields keys a card is currently displaying: render_voice_card is
     # an @st.fragment, so a Play in one card reruns only that card — evicting a
     # sibling's key here would orphan its still-visible player until a full rerun.
-    candidates = [k for k in audio_keys if k not in protect]
-    # Drop the oldest by generation order (lowest seq); never trust iteration order.
-    candidates.sort(key=lambda k: st.session_state[k].get("seq", 0))
-    for k in candidates[:overflow]:
+    #
+    # It is a preference, not a veto, so the bound cannot quietly depend on how
+    # many voices a language happens to ship. Treating protection as absolute is
+    # only safe while every language has at most AUDIO_CACHE_LIMIT voices: beyond
+    # that, every cached clip can be on display at once, nothing is evictable, and
+    # the documented cap degrades into one clip per voice. American English has
+    # exactly 20 against a limit of 20 — zero margin, so a single voice added
+    # upstream would be enough. Unprotected keys go first, displayed ones only if
+    # the cap still isn't met. The clip just generated carries the highest seq, so
+    # it sorts last and is never the one dropped.
+    ordered = [k for k in by_age if k not in protect]
+    ordered += [k for k in by_age if k in protect]
+    for k in ordered[:overflow]:
         del st.session_state[k]
 
 
@@ -401,7 +436,11 @@ def generate_one(
             chunks.append(chunk)
             st.write(f"Chunk {i}...")
         status.update(label=f"{voice} complete!", state="complete")
-    return {"audio": np.concatenate(chunks), "voice": voice, "phonemes": phonemes}
+    return {
+        "wav": _audio_to_wav_bytes(np.concatenate(chunks)),
+        "voice": voice,
+        "phonemes": phonemes,
+    }
 
 
 @st.fragment
@@ -411,6 +450,11 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
         cached = st.session_state[stale_key] if stale_key is not None else None
         indicator = ":material/volume_up: " if cached is not None else ""
         st.markdown(f"{indicator}**{_format_voice(voice)}**")
+        # Columns, not st.container(horizontal=True). A horizontal container
+        # sizes children from their intrinsic width (`flex: 1 1 fit-content`),
+        # which measured 358 px of selectbox against 306 px of button in a 680 px
+        # row. The even split here is deliberate, so this stays a proportional
+        # grid — the case the guidance still reserves columns for.
         speed_col, play_col = st.columns([1, 1])
         with speed_col:
             card_speed = st.selectbox(
@@ -420,6 +464,15 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 key=f"speed_{voice}",
                 label_visibility="collapsed",
                 format_func=lambda x: f"{x}x",
+                # Cards inside the collapsed "Show all voices" expander are not
+                # drawn, and Streamlit discards the state of any widget a run did
+                # not draw. Without this a tail voice's speed snapped back to 1.0x
+                # on reopen — and because _cache_key includes the speed, that also
+                # demoted its generated clip to a "speed changed" stale preview.
+                # "session" is required: "page" measurably does not hold the value
+                # here, its scope being page navigation rather than a widget going
+                # unrendered within one page.
+                persist_state="session",
             )
         with play_col:
             play_clicked = st.button(
@@ -464,19 +517,23 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 # down the sibling cards, so it is surfaced in-place instead.
                 st.exception(e)
         if key in st.session_state:
-            audio = st.session_state[key]["audio"]
-            st.audio(audio, sample_rate=SAMPLE_RATE)
+            wav = st.session_state[key]["wav"]
+            st.audio(wav, format="audio/wav")
             st.download_button(
                 label="Download",
                 icon=":material/download:",
-                data=_audio_to_wav_bytes(audio),
+                data=wav,
                 file_name=f"{voice}_{card_speed}x.wav",
                 mime="audio/wav",
                 key=f"download_{voice}",
+                # Nothing on the page depends on the click, and the default
+                # "rerun" would re-render this fragment while the browser is
+                # still fetching the file.
+                on_click="ignore",
             )
         elif cached is not None:
             st.caption("Click Play to refresh (speed changed)")
-            st.audio(cached["audio"], sample_rate=SAMPLE_RATE)
+            st.audio(cached["wav"], format="audio/wav")
 
 
 def render_phonemes(phonemes: str, *, expanded: bool = False) -> None:
@@ -556,8 +613,14 @@ with input_col:
             st.error(_tokenize_error_message(lang_code, e))
     _render_length_caption(text_input, lang_code)
     _render_persistent_phonemes(text_input, lang_code)
-    st.markdown("**Note:**")
-    st.markdown(PRONUNCIATION_TIPS)
+    # A bordered container, not st.info. The alert component renders
+    # role="status" for non-error kinds, i.e. an ARIA live region, which asks a
+    # screen reader to announce this as a status update; the note is permanent
+    # reference content that belongs in the normal reading order. A bordered
+    # container groups it just as well with no announcement semantics.
+    with st.container(border=True):
+        st.markdown(":material/lightbulb: **Note**")
+        st.markdown(PRONUNCIATION_TIPS)
 
 with controls_col:
     gender_selection = st.segmented_control(
@@ -573,16 +636,40 @@ with controls_col:
     # Reset the protect map on every full rerun — even when the filter empties the
     # list — so voices dropped by a filter or language change don't linger. Each
     # card's fragment re-populates its own entry with the key it is displaying (see
-    # render_voice_card); both the visible loop and the always-executed expander
-    # body run on every full rerun.
+    # render_voice_card). Only the cards this run actually draws register, so while
+    # the expander is collapsed the map holds the visible ones alone; that is what
+    # leaves _evict_old_audio enough unprotected keys to hold the cache limit.
     st.session_state["_displayed_card_keys"] = {}
     if voices:
         visible, hidden = _split_voices_for_display(voices, None)
         for voice in visible:
             render_voice_card(voice, text_input, lang_code)
         if hidden:
-            with st.expander("Show all voices", icon=":material/library_music:"):
-                for voice in hidden:
-                    render_voice_card(voice, text_input, lang_code)
+            # `on_change="rerun"` is what makes `.open` meaningful. Left at the
+            # default, an expander computes its whole body even while collapsed —
+            # for American English that is 14 extra voice cards, each with a
+            # session_state scan and three widgets, rebuilt on every rerun.
+            # Opening now costs one rerun; every other rerun stops paying for it.
+            # Keying the expander makes it a widget, so its open state is subject
+            # to the same collection as any other: a language or filter leaving
+            # six voices or fewer skips this branch entirely, Streamlit drops
+            # `show_all_voices`, and coming back finds the expander shut. That is
+            # the bug `persist_state` fixes for the speed selectbox, but
+            # st.expander has no such option, so the state is mirrored by hand
+            # into a plain key and fed back through `expanded`. Widget state wins
+            # over `expanded` whenever the key survives, so this only takes
+            # effect on the runs that actually lost it.
+            more_voices = st.expander(
+                "Show all voices",
+                icon=":material/library_music:",
+                on_change="rerun",
+                key="show_all_voices",
+                expanded=st.session_state.get("_show_all_voices_pref", False),
+            )
+            st.session_state["_show_all_voices_pref"] = bool(more_voices.open)
+            if more_voices.open:
+                with more_voices:
+                    for voice in hidden:
+                        render_voice_card(voice, text_input, lang_code)
     else:
         st.caption("No voices match this filter.")

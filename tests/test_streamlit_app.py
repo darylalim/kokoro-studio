@@ -49,6 +49,13 @@ from streamlit_app import (
 )
 from voice_grades import _GRADE_RANK, VOICE_GRADES, _grade_rank
 
+# A cached clip is encoded WAV, not samples: both the player and the download
+# want bytes, and st.audio would otherwise re-encode the array on every render.
+_WAV = _audio_to_wav_bytes(np.ones(100, dtype=np.float32))
+# A second, distinguishable clip, for tests that must tell two cache entries
+# apart (recency by `seq`) now that the payload is opaque bytes.
+_WAV_ALT = _audio_to_wav_bytes(np.zeros(100, dtype=np.float32))
+
 EXPECTED_LANGUAGES = [
     "American English",
     "Brazilian Portuguese",
@@ -369,7 +376,11 @@ class TestGenerateOne:
         c2.audio = np.zeros(30, dtype=np.float32)
         model.generate.return_value = [c1, c2]
         result = generate_one("hi", "af_heart", model, 1.0, "a")
-        assert result["audio"].shape == (80,)
+        # The chunks are concatenated then encoded once, so assert on the WAV
+        # the card will actually play rather than on an intermediate array.
+        assert result["wav"] == _audio_to_wav_bytes(
+            np.concatenate([c1.audio, c2.audio])
+        )
 
     def test_passes_speed_and_lang(self) -> None:
         self._mock_tokenizer()
@@ -528,7 +539,7 @@ class TestEvictOldAudio:
     def _fill_cache(n: int) -> None:
         for i in range(n):
             st.session_state[f"audio:v{i}:a:1.0:{i}"] = {
-                "audio": np.zeros(1, dtype=np.float32),
+                "wav": _WAV,
                 "voice": f"v{i}",
                 "phonemes": "x",
                 "seq": i,
@@ -588,7 +599,7 @@ class TestEvictOldAudio:
         n = AUDIO_CACHE_LIMIT + 1
         for i in range(n):
             st.session_state[f"audio:v{i}:a:1.0:{i}"] = {
-                "audio": np.zeros(1, dtype=np.float32),
+                "wav": _WAV,
                 "voice": f"v{i}",
                 "phonemes": "x",
                 "seq": n - i,  # last-inserted v{n-1} has the lowest seq (=1)
@@ -599,10 +610,34 @@ class TestEvictOldAudio:
         assert "audio:v0:a:1.0:0" in st.session_state  # highest seq survives
         self._clear_audio_cache()
 
+    def test_cap_still_holds_when_every_key_is_protected(self) -> None:
+        # Reachable only once some language ships more than AUDIO_CACHE_LIMIT
+        # voices, because a card protects exactly one key: American English has
+        # 20 against a limit of 20, so today there is always one unprotected key
+        # to drop. That is zero margin, and while `protect` was an absolute veto
+        # a single voice added upstream would have left nothing evictable and
+        # turned the documented bound into one clip per voice. The bound wins.
+        self._clear_audio_cache()
+        self._fill_cache(AUDIO_CACHE_LIMIT + 3)
+        everything = frozenset(
+            k for k in st.session_state if isinstance(k, str) and k.startswith("audio:")
+        )
+        _evict_old_audio(protect=everything)
+        assert self._count_audio_keys() == AUDIO_CACHE_LIMIT
+        # Oldest-first still picks which protected keys give way.
+        for i in range(3):
+            assert f"audio:v{i}:a:1.0:{i}" not in st.session_state
+        assert (
+            f"audio:v{AUDIO_CACHE_LIMIT}:a:1.0:{AUDIO_CACHE_LIMIT}" in st.session_state
+        )
+        self._clear_audio_cache()
+
     def test_protected_key_survives_even_when_lowest_seq(self) -> None:
-        # A key a card is currently displaying (passed in `protect`) is never
-        # evicted, even if it is the oldest — guards the fragment scenario where
-        # one card's Play would otherwise orphan a sibling's on-screen player.
+        # A key a card is displaying (passed in `protect`) yields to any
+        # unprotected key, however much newer — guarding the fragment scenario
+        # where one card's Play would orphan a sibling's on-screen player. It is
+        # a preference, not immunity: see the every-key-protected case above,
+        # where the cap wins and the oldest displayed keys do go.
         self._clear_audio_cache()
         self._fill_cache(AUDIO_CACHE_LIMIT + 1)
         oldest = "audio:v0:a:1.0:0"  # seq=0, the normal eviction victim
@@ -638,7 +673,7 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
         key = _cache_key("af_heart", "hello", 0.7, "a")
         payload = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -650,7 +685,7 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
         key = _cache_key("af_heart", "hello", 1.0, "a")
         st.session_state[key] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -661,7 +696,7 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
         key = _cache_key("af_heart", "hello", 1.0, "a")
         st.session_state[key] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -672,7 +707,7 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
         key = _cache_key("af_heart", "hello", 1.0, "a")
         st.session_state[key] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -687,20 +722,20 @@ class TestFindStaleCachedAudio:
         key_07 = _cache_key("af_heart", "hello", 0.7, "a")
         key_15 = _cache_key("af_heart", "hello", 1.5, "a")
         st.session_state[key_15] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 2,
         }
         st.session_state[key_07] = {
-            "audio": np.zeros(10, dtype=np.float32),
+            "wav": _WAV_ALT,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
         assert result is not None
-        assert result["audio"][0] == 1.0  # higher-seq 1.5 entry, not last-inserted
+        assert result["wav"] == _WAV  # higher-seq 1.5 entry, not last-inserted
         self._clear_audio_cache()
 
     def test_returns_highest_seq_regardless_of_insertion_order(self) -> None:
@@ -712,20 +747,20 @@ class TestFindStaleCachedAudio:
         key_07 = _cache_key("af_heart", "hello", 0.7, "a")
         key_15 = _cache_key("af_heart", "hello", 1.5, "a")
         st.session_state[key_07] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 2,
         }
         st.session_state[key_15] = {
-            "audio": np.zeros(10, dtype=np.float32),
+            "wav": _WAV_ALT,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
         assert result is not None
-        assert result["audio"][0] == 1.0  # higher-seq 0.7 entry, not last-inserted
+        assert result["wav"] == _WAV  # higher-seq 0.7 entry, not last-inserted
         self._clear_audio_cache()
 
 
@@ -745,6 +780,8 @@ class TestRenderVoiceCard:
                 del st.session_state[k]
 
     def test_renders_bordered_container(self) -> None:
+        # Opened inside the fragment, not passed in: a shared container would
+        # make every card one fragment instance.
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
         st.container.assert_called_once_with(border=True)  # ty: ignore[unresolved-attribute]
@@ -757,7 +794,7 @@ class TestRenderVoiceCard:
     def test_badge_when_cached_at_current_speed(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -769,7 +806,7 @@ class TestRenderVoiceCard:
     def test_badge_when_cached_at_other_speed(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "hello", 0.7, "a")] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -781,7 +818,7 @@ class TestRenderVoiceCard:
     def test_no_badge_when_cache_for_different_text(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "different_text", 1.0, "a")] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -791,7 +828,7 @@ class TestRenderVoiceCard:
     def test_no_badge_when_cache_for_different_voice(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_bella", "hello", 1.0, "a")] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_bella",
             "phonemes": "x",
         }
@@ -822,14 +859,14 @@ class TestRenderVoiceCard:
         st.session_state.pop("_displayed_card_keys", None)
         current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
         st.session_state[current] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 1,
         }
         newer_other_speed = _cache_key("af_heart", "hello", 0.7, "a")
         st.session_state[newer_other_speed] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 2,  # higher seq than the current-speed take
@@ -850,7 +887,7 @@ class TestRenderVoiceCard:
         st.session_state.pop("_displayed_card_keys", None)
         stale = _cache_key("af_heart", "hello", 0.7, "a")  # not the current 1.0
         st.session_state[stale] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 1,
@@ -892,7 +929,7 @@ class TestRenderVoiceCard:
         self._reset_mocks()
         key = _cache_key("af_heart", "hello", 1.0, "a")
         st.session_state[key] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "hɛlˈoʊ",
         }
@@ -905,16 +942,21 @@ class TestRenderVoiceCard:
         render_voice_card("af_heart", "never_cached_for_this_test", "a")
         st.audio.assert_not_called()  # ty: ignore[unresolved-attribute]
 
-    def test_audio_uses_correct_sample_rate_when_cached(self) -> None:
+    def test_audio_is_played_from_the_cached_wav(self) -> None:
+        # Passing the encoded clip rather than samples is what keeps st.audio
+        # from re-encoding the array on every render; the rate is in the header.
         self._reset_mocks()
         key = _cache_key("af_heart", "hello", 1.0, "a")
         st.session_state[key] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
-        assert st.audio.call_args[1]["sample_rate"] == SAMPLE_RATE  # ty: ignore[unresolved-attribute]
+        args, kwargs = st.audio.call_args  # ty: ignore[unresolved-attribute]
+        assert args[0] == _WAV
+        assert kwargs["format"] == "audio/wav"
+        assert "sample_rate" not in kwargs
         del st.session_state[key]
 
     def test_renders_stale_audio_with_caption_when_only_other_speed_cached(
@@ -925,7 +967,7 @@ class TestRenderVoiceCard:
         # Cache key uses speed=0.7, but the conftest selectbox mock returns 1.0
         old_key = _cache_key("af_heart", "hello", 0.7, "a")
         st.session_state[old_key] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -941,12 +983,12 @@ class TestRenderVoiceCard:
         fresh_key = _cache_key("af_heart", "hello", 1.0, "a")
         stale_key = _cache_key("af_heart", "hello", 0.7, "a")
         st.session_state[fresh_key] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
         st.session_state[stale_key] = {
-            "audio": np.zeros(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -956,10 +998,25 @@ class TestRenderVoiceCard:
         del st.session_state[fresh_key]
         del st.session_state[stale_key]
 
+    def test_speed_selectbox_persists_while_unrendered(self) -> None:
+        """The speed must outlive a card that a run did not draw.
+
+        Cards inside the collapsed "Show all voices" expander are not drawn, and
+        Streamlit discards the state of any widget a run skipped. Losing it sends
+        the card back to 1.0x on reopen and — since `_cache_key` includes the
+        speed — demotes its clip to a stale preview. Only "session" holds the
+        value; "page" was measured not to (its scope is page navigation).
+        `tests_integration` exercises the real collapse/reopen cycle.
+        """
+        self._reset_mocks()
+        render_voice_card("af_heart", "hello", "a")
+        kwargs = st.selectbox.call_args[1]  # ty: ignore[unresolved-attribute]
+        assert kwargs["persist_state"] == "session"
+
     def test_download_button_rendered_when_fresh_audio_cached(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -969,7 +1026,7 @@ class TestRenderVoiceCard:
     def test_download_button_file_name_includes_voice_and_speed(self) -> None:
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -979,23 +1036,38 @@ class TestRenderVoiceCard:
         assert kwargs["mime"] == "audio/wav"
         assert kwargs["key"] == "download_af_heart"
 
-    def test_download_button_data_is_bytes(self) -> None:
+    def test_download_serves_the_cached_wav_without_re_encoding(self) -> None:
+        # The bytes come straight from the cache entry, so neither the player
+        # nor the button re-runs sf.write on a rerun that merely draws the card.
         self._reset_mocks()
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
-        assert isinstance(kwargs["data"], bytes)
+        assert kwargs["data"] is _WAV
         assert kwargs["data"][:4] == b"RIFF"
+
+    def test_download_click_does_not_rerun_the_fragment(self) -> None:
+        # Nothing on the page depends on the click, and the default "rerun"
+        # re-renders the card while the browser is still fetching the file.
+        self._reset_mocks()
+        st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
+            "wav": _WAV,
+            "voice": "af_heart",
+            "phonemes": "x",
+        }
+        render_voice_card("af_heart", "hello", "a")
+        kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
+        assert kwargs["on_click"] == "ignore"
 
     def test_no_download_button_for_stale_audio(self) -> None:
         self._reset_mocks()
         # Cached at speed 0.7 — stale relative to default speed 1.0
         st.session_state[_cache_key("af_heart", "hello", 0.7, "a")] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -1011,7 +1083,7 @@ class TestRenderVoiceCard:
         self._reset_mocks()
         st.button.return_value = True  # ty: ignore[unresolved-attribute]
         fake_result = {
-            "audio": np.ones(50, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "hɛlˈoʊ",
         }
@@ -1090,7 +1162,7 @@ class TestRenderVoiceCard:
         sibling_key = _cache_key("af_bella", "hello", 0.7, "a")
         st.session_state["_displayed_card_keys"] = {"af_bella": sibling_key}
         fake_result = {
-            "audio": np.ones(50, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -1117,14 +1189,14 @@ class TestRenderVoiceCard:
         st.button.return_value = True  # ty: ignore[unresolved-attribute]
         stale = _cache_key("af_heart", "hello", 0.7, "a")  # prior take, other speed
         st.session_state[stale] = {
-            "audio": np.ones(10, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
             "seq": 1,
         }
         current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
         fake_result = {
-            "audio": np.ones(50, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -1144,7 +1216,7 @@ class TestRenderVoiceCard:
         # Stale audio exists but for different text
         old_key = _cache_key("af_heart", "different_text", 0.7, "a")
         st.session_state[old_key] = {
-            "audio": np.ones(100, dtype=np.float32),
+            "wav": _WAV,
             "voice": "af_heart",
             "phonemes": "x",
         }
@@ -1520,21 +1592,30 @@ class TestSampleButtonsConfig:
 
     def test_each_language_has_exactly_one_random_button(self) -> None:
         for lang, buttons in SAMPLE_BUTTONS.items():
-            random_count = sum(1 for _, _, is_random in buttons if is_random)
+            random_count = sum(1 for b in buttons if b.is_random)
             assert random_count == 1, f"{lang} has {random_count} random buttons"
 
     def test_button_tuples_have_correct_shape(self) -> None:
         for buttons in SAMPLE_BUTTONS.values():
             for entry in buttons:
-                assert len(entry) == 3
-                label, filename, is_random = entry
+                assert len(entry) == 4
+                label, icon, filename, is_random = entry
                 assert isinstance(label, str) and label
+                assert isinstance(icon, str) and icon
                 assert isinstance(filename, str) and filename.endswith(".txt")
                 assert isinstance(is_random, bool)
 
+    def test_labels_carry_no_icon_of_their_own(self) -> None:
+        # The icon belongs in st.button's `icon=`, not in the accessible name.
+        for lang, buttons in SAMPLE_BUTTONS.items():
+            for entry in buttons:
+                assert entry.icon not in entry.label, (
+                    f"{lang} label {entry.label!r} still embeds its icon"
+                )
+
     def test_filenames_unique_within_language(self) -> None:
         for lang, buttons in SAMPLE_BUTTONS.items():
-            filenames = [b[1] for b in buttons]
+            filenames = [b.filename for b in buttons]
             assert len(set(filenames)) == len(filenames), (
                 f"{lang} has duplicate filenames"
             )
@@ -1546,8 +1627,8 @@ class TestSampleFilesExist:
 
         samples_dir = Path(streamlit_app.__file__).parent / "samples"
         for lang, buttons in SAMPLE_BUTTONS.items():
-            for _, filename, _ in buttons:
-                path = samples_dir / lang / filename
+            for entry in buttons:
+                path = samples_dir / lang / entry.filename
                 assert path.exists(), f"missing: {path}"
                 assert path.stat().st_size > 0, f"empty: {path}"
 
@@ -1625,6 +1706,8 @@ class TestRenderSampleButtons:
         st.button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_creates_one_column_per_button(self) -> None:
+        # Columns, not a horizontal container: the latter sizes children by
+        # their label width, giving a visibly ragged row.
         self._reset_mocks()
         _render_sample_buttons("a")
         st.columns.assert_called_once_with(3)  # ty: ignore[unresolved-attribute]
@@ -1652,10 +1735,15 @@ class TestRenderSampleButtons:
         self._reset_mocks()
         _render_sample_buttons("a")
         seen_args = [call.kwargs.get("args") for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
-        expected = [
-            ("a", fname, is_random) for _, fname, is_random in SAMPLE_BUTTONS["a"]
-        ]
+        expected = [("a", b.filename, b.is_random) for b in SAMPLE_BUTTONS["a"]]
         assert seen_args == expected
+
+    def test_button_icon_is_passed_separately_from_the_label(self) -> None:
+        self._reset_mocks()
+        _render_sample_buttons("a")
+        calls = st.button.call_args_list  # ty: ignore[unresolved-attribute]
+        seen = [(c.args[0], c.kwargs.get("icon")) for c in calls]
+        assert seen == [(b.label, b.icon) for b in SAMPLE_BUTTONS["a"]]
 
     def test_renders_for_non_english_language(self) -> None:
         self._reset_mocks()

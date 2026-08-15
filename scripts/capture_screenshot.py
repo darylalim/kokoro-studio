@@ -7,7 +7,7 @@ app, then run this through `uvx`:
     uv run streamlit run streamlit_app.py --server.headless true &
     uvx --with playwright python scripts/capture_screenshot.py
 
-This is a script rather than a paragraph of instructions because all four ways
+This is a script rather than a paragraph of instructions because all six ways
 it goes wrong produce a *plausible but wrong image* instead of an error:
 
 * `embed_options=dark_theme` is a no-op, so dark mode is forced by emulating the
@@ -20,6 +20,14 @@ it goes wrong produce a *plausible but wrong image* instead of an error:
   a brighter red, so it is blurred and the mouse parked before the shot.
 * `.stMainBlockContainer`'s own bounding box overshoots the visible content by
   its bottom padding, so the crop height is measured off the last real elements.
+* Waiting on "Show all voices" proves the column exists, not that it is full: a
+  capture once shipped with five of the six cards, the second slot simply absent
+  and no step failing. `wait_for_cards` pins the count instead.
+* Playwright's `text=` engine matches a case-insensitive *substring*, so waiting
+  on "Phonemes" after Tokenize resolved instantly against the length caption
+  ("275 phonemes — ideal"), which the sample text alone renders. The wait was a
+  no-op and only a 1.2s sleep stood between a cold G2P load and a shot with the
+  expander empty. Wait on the expander's own label instead.
 
 `embed=true` drops the Deploy/⋮ toolbar; `show_padding` restores the top margin
 that embed mode strips.
@@ -48,11 +56,28 @@ CROP_MARGIN = 48
 
 GENERATION_TIMEOUT_MS = 240_000
 
+# Cards drawn outside the expander — `_split_voices_for_display`'s `top_n`.
+EXPECTED_VISIBLE_CARDS = 6
+
+# Every card carries exactly one Play button, so counting them counts cards.
+_PLAY_BUTTON_COUNT = (
+    "n => [...document.querySelectorAll('button')]"
+    ".filter(b => b.innerText.trim().endsWith('Play')).length === n"
+)
+
+
+def wait_for_cards(page: Page) -> None:
+    """Block until the voice column is full, not merely present."""
+    page.wait_for_function(
+        _PLAY_BUTTON_COUNT, arg=EXPECTED_VISIBLE_CARDS, timeout=60_000
+    )
+
 
 def drive(page: Page) -> None:
     """Put the app into the mid-session state the hero is meant to show."""
     page.goto(URL, wait_until="networkidle")
     page.wait_for_selector("text=Show all voices", timeout=60_000)
+    wait_for_cards(page)
     page.wait_for_timeout(1_500)
 
     page.get_by_role("button", name="Gatsby").click()
@@ -61,22 +86,37 @@ def drive(page: Page) -> None:
     )
 
     page.get_by_role("button", name="Tokenize").click()
-    page.wait_for_selector("text=Phonemes", timeout=60_000)
+    # Not "text=Phonemes": that substring-matches the length caption, which is
+    # already on screen. Wait for the expander, then for tokens inside it.
+    page.wait_for_selector("text=Phoneme Tokens", timeout=60_000)
+    page.wait_for_selector('[data-testid="stCode"]', timeout=60_000)
     page.wait_for_timeout(1_200)
 
     page.get_by_role("button", name="Play").first.click()
     page.wait_for_selector("audio", timeout=GENERATION_TIMEOUT_MS)
     page.wait_for_timeout(3_000)
 
-    alerts = page.locator('[data-testid="stAlert"]').all_inner_texts()
-    if alerts:
-        raise RuntimeError(f"app raised an alert, refusing to ship the shot: {alerts}")
+    # Match the error variants, not `stAlert`: the pronunciation note is an
+    # st.info and so is an stAlert itself, which would abort every capture.
+    # Streamlit suffixes the *content* testid with the severity
+    # (stAlertContentInfo / stAlertContentError) and leaves the outer stAlert
+    # container severity-agnostic; st.exception renders stException instead.
+    failures = page.locator(
+        '[data-testid="stAlertContentError"], [data-testid="stException"]'
+    ).all_inner_texts()
+    if failures:
+        raise RuntimeError(
+            f"app surfaced an error, refusing to ship the shot: {failures}"
+        )
 
     # Drop the focus ring the click left behind, and park the cursor off-canvas
     # so nothing renders a hover state.
     page.evaluate("document.activeElement && document.activeElement.blur()")
     page.mouse.move(4, 4)
     page.wait_for_timeout(1_200)
+
+    # Re-check after the Play rerun, immediately before the shot is measured.
+    wait_for_cards(page)
 
 
 def crop_height(page: Page) -> int:

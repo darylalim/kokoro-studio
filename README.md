@@ -57,7 +57,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 
 **Text & pronunciation tools**
 
-- Per-language sample buttons to seed the text box with public-domain reference text: a localized random-quote button (e.g. "🎲 Random Quote" in English, "🎲 古语" in Chinese) plus two literary excerpts.
+- Per-language sample buttons to seed the text box with public-domain reference text: a localized random-quote button (🎲 "Random quote" in English, 🎲 "古语" in Chinese) plus two literary excerpts, each 📕/📗 excerpt named for its source.
 - Tokenize button to preview the phoneme tokens before synthesizing.
 - Utterance-length caption under the text box, color-coded against [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) bands (very short / short / ideal / long / will-be-chunked).
 - Always-visible pronunciation note with Kokoro-specific syntax (custom phonemes, stress, intonation).
