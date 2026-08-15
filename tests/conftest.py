@@ -5,7 +5,10 @@ from unittest.mock import MagicMock
 
 # Mock streamlit to prevent UI initialization on import
 _st = MagicMock()
-_st.cache_resource = lambda f: f
+# Both cache decorators must pass the decorated function through unchanged and
+# accept the bare `@st.cache_resource` and parametrized `@st.cache_resource(...)`
+# forms — the app uses both, to set show_spinner per function.
+_st.cache_resource = lambda *args, **_kw: args[0] if args else (lambda f: f)
 _st.cache_data = lambda *args, **_kw: args[0] if args else (lambda f: f)
 # @st.fragment must pass the decorated function through unchanged, supporting
 # both bare `@st.fragment` and parametrized `@st.fragment(...)` forms.

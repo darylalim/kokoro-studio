@@ -46,7 +46,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 **Generation & playback**
 
 - Per-card Play button generates audio on demand and embeds an inline player — play multiple cards to A/B-compare voices on the same text. Each card reruns on its own, so playing one voice or changing its speed never reloads the whole page.
-- Per-card speed control (0.7x–1.5x in 0.1 steps); a speaker icon marks voices with cached audio, and changing speed keeps the previous clip visible until you press Play again.
+- Per-card speed control (0.7x–1.5x in 0.1 steps); a green **Cached** badge marks voices with cached audio, and changing speed keeps the previous clip visible until you press Play again.
 - Per-card Download button for the generated WAV.
 - Chunk-by-chunk generation progress while a clip is being synthesized.
 - Light and dark themes with a toolbar toggle.
@@ -100,7 +100,7 @@ uv run python -m unidic download
 5. Pick a voice card — the top 6 by quality grade are shown directly, with the rest behind **Show all voices**.
 6. Choose a playback speed (0.7x–1.5x).
 7. Click **Play**. Generation progress appears inline, and the audio player shows up in the card when it's done.
-8. Play other cards to A/B-compare voices on the same text (a speaker icon marks cards that already have audio), and use **Download** to save any clip as a WAV.
+8. Play other cards to A/B-compare voices on the same text (a **Cached** badge marks cards that already have audio), and use **Download** to save any clip as a WAV.
 
 > **Tip:** For custom pronunciation, use the in-app syntax — e.g. `[Kokoro](/kˈOkəɹO/)`. See the **Note** panel in the app for stress and intonation controls.
 

@@ -786,7 +786,7 @@ class TestRenderVoiceCard:
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
-            ":material/volume_up: **Heart (female) — A**"
+            "**Heart (female) — A** :green-badge[Cached]"
         )
 
     def test_badge_when_cached_at_other_speed(self) -> None:
@@ -797,7 +797,7 @@ class TestRenderVoiceCard:
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
-            ":material/volume_up: **Heart (female) — A**"
+            "**Heart (female) — A** :green-badge[Cached]"
         )
 
     def test_no_badge_when_cache_for_different_text(self) -> None:

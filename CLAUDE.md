@@ -144,7 +144,7 @@ Voice files are named `{lang}{gender}_{name}` (e.g. `af_heart`) with a `.safeten
 ### Performance
 
 - MLX runs natively on Apple Silicon — no PyTorch or MPS fallback.
-- `@st.cache_resource` for the model, the per-language tokenizers, and the snapshot path; `@st.cache_data` for per-language voice lists (a local filesystem walk, no TTL needed).
+- `@st.cache_resource` for the model, the per-language tokenizers, and the snapshot path; `@st.cache_data` for per-language voice lists (a local filesystem walk, no TTL needed). All three `cache_resource` sites set `show_spinner` explicitly, because the default renders ``Running `load_pipeline()`.`` — the Python identifier — at exactly the three moments the app makes a user wait (`cache_utils.py:467`). `ensure_repo_downloaded` passes `False` since it renders its own message; the other two pass a sentence. This is why `tests/conftest.py` must mock `cache_resource` in the tolerant `lambda *args, **_kw:` form — the bare `lambda f: f` fails to collect the entire suite the moment any call site is parameterized.
 - Model load is deferred to the first Play click, so initial render isn't blocked. That click builds **one** G2P stack, not two — see `generate_one`.
 - `generate_speech` uses `np.asarray(..., dtype=np.float32)` to avoid copying chunks that are already float32.
 - `render_voice_card` being a fragment means a Play click reruns one card, not the script. One accepted trade-off: a sibling card's cached badge refreshes on the next full rerun, not instantly.
@@ -153,7 +153,9 @@ Voice files are named `{lang}{gender}_{name}` (e.g. `af_heart`) with a `.safeten
 
 ### UI
 
-Layout is `st.set_page_config(layout="wide", …)` (first command) → `st.title` → a full-width `Language` selectbox → a two-column split. Generated audio renders inline inside each card; there is no separate output row.
+Layout is `st.set_page_config(layout="wide", …)` (first command) → `st.title` → the first-launch download guard → an orientation `st.caption` → a labeled, fixed-width (320 px) `Language` selectbox → a two-column split. Generated audio renders inline inside each card; there is no separate output row.
+
+The caption sits **after** the download guard on purpose: above it, an orientation line promising offline synthesis would render over the one-time ~355 MB download and directly above its failure message. The `Language` selectbox is deliberately not stretched — at `layout="wide"` a full-width dropdown under the title reads as a banner rather than as the app's primary control, and `st.selectbox` accepts only `"stretch"` or an int, so there is no fit-to-content width to use instead.
 
 **Left column:** a tall `st.text_area` (no character cap) → a `st.columns(3)` row of sample buttons per language from `SAMPLE_BUTTONS` (random-quote plus two excerpts, each wired `on_click=_set_text_from_sample`) → a `Tokenize` button, disabled on empty text, storing `(text, lang_code, phonemes)` in `st.session_state["last_phonemes"]` → the utterance-length caption (exact count when `last_phonemes` matches the current `(text, lang_code)`, else `~estimate`) → the phoneme expander, which opens itself on a match so tokenized output survives reruns → the always-visible `PRONUNCIATION_TIPS` note inside a bordered `st.container`.
 
@@ -161,7 +163,7 @@ The note is deliberately **not** `st.info`. Streamlit's alert renders `role="sta
 
 `SampleButton` carries `icon` as its own field so the emoji reaches `st.button(icon=…)` rather than the label — concatenating them made the icon part of the accessible name. The emoji are deliberate over Material Symbols: 📕/📗 separate the two excerpts by colour, which a monochrome symbol can't.
 
-**Right column:** an `st.segmented_control` gender filter with `required=True`, so one segment is always selected and there is no empty state; `"All"` maps to `None` via `_gender_code_from_selection`. Then the voice cards — top 6 by grade visible, the rest behind a "Show all voices" expander, or a caption when the filter matches nothing.
+**Right column:** an `st.segmented_control` gender filter with `required=True`, so one segment is always selected and there is no empty state; `"All"` maps to `None` via `_gender_code_from_selection`. Then the voice cards — top 6 by grade visible, the rest behind a `Show all voices (N more)` expander, or a caption when the filter matches nothing. The count is in the label because the bare string said a tail existed but not that it was 14 of 20; note this makes the label track the gender filter, and `st.expander` hashes `label` into its element id (`layouts.py` computes it with `key_as_main_identity=False` over both `label` and `expanded`), so widget identity now churns on filter changes as well. That is only safe because `expanded` is in the same hash — identity already churned on every open and close, and the `_show_all_voices_pref` mirror below is what carries the state across it.
 
 **That expander is lazy and must stay that way.** It is built with `on_change="rerun"` + `key="show_all_voices"` and its body is guarded by `if more_voices.open:`. At the default `on_change="ignore"` an expander computes its whole body while collapsed — 14 surplus voice cards for American English's 20 voices, each a full `st.session_state` scan plus three widgets, on every rerun. Two consequences to keep in mind before touching it:
 

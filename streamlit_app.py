@@ -151,7 +151,12 @@ SAMPLE_BUTTONS: dict[str, list[SampleButton]] = {
 }
 
 
-@st.cache_resource
+# show_spinner=False because this function renders its own, written for the
+# moment it appears. Left at the default, Streamlit stacks a second spinner
+# reading "Running `ensure_repo_downloaded()`." — the Python identifier — above
+# the real one for the entire ~355 MB download, which is the longest wait the
+# app ever shows and a first-time user's first impression of it.
+@st.cache_resource(show_spinner=False)
 def ensure_repo_downloaded() -> str:
     try:
         return snapshot_download(REPO_ID, local_files_only=True)
@@ -171,7 +176,9 @@ def get_voices(lang_code: str) -> list[str]:
     return sorted(voices, key=lambda v: (_grade_rank(v), v))
 
 
-@st.cache_resource
+# The default spinner would read "Running `load_pipeline()`." at the one moment
+# the app makes the user wait without explanation — the first Play of a session.
+@st.cache_resource(show_spinner="Loading the Kokoro model (first play only)...")
 def load_pipeline() -> Any:
     model = load_model(REPO_ID)  # ty: ignore[invalid-argument-type]
     # mlx-audio's Kokoro Model hard-codes `prince-canuma/Kokoro-82M` as the repo
@@ -204,7 +211,10 @@ def _create_g2p(lang_code: str) -> Any:
     return mespeak.EspeakG2P(language=ESPEAK_LANGUAGES[lang_code])
 
 
-@st.cache_resource
+# Building a language's G2P stack is the slow part of Tokenize (spaCy plus the
+# espeak fallback for English, UniDic for Japanese), and the default spinner
+# names the function and its argument rather than saying so.
+@st.cache_resource(show_spinner="Preparing the tokenizer for this language...")
 def load_tokenizer(lang_code: str) -> Any:
     return _create_g2p(lang_code)
 
@@ -457,8 +467,15 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
     with st.container(border=True):
         stale_key = _stale_cached_key(voice, text, lang_code)
         cached = st.session_state[stale_key] if stale_key is not None else None
-        indicator = ":material/volume_up: " if cached is not None else ""
-        st.markdown(f"{indicator}**{_format_voice(voice)}**")
+        # Appended, not prefixed: an icon in front shifted the voice name right by
+        # its own width the moment a card had audio, so a stacked column of six
+        # cards lost its left edge during exactly the A/B comparison the cache
+        # exists for. A badge also names the state rather than leaving a bare
+        # speaker glyph to be guessed at. "Cached", not "Ready": it fires when
+        # audio exists at *any* speed, including the case where the body below
+        # reads "speed changed".
+        badge = " :green-badge[Cached]" if cached is not None else ""
+        st.markdown(f"**{_format_voice(voice)}**{badge}")
         # Columns, not st.container(horizontal=True). A horizontal container
         # sizes children from their intrinsic width (`flex: 1 1 fit-content`),
         # which measured 358 px of selectbox against 306 px of button in a 680 px
@@ -583,10 +600,25 @@ except Exception:  # noqa: BLE001
     )
     st.stop()
 
+# Below the download guard on purpose: above it, this line would render over the
+# one-time download and directly above its failure message, and both contradict
+# the claim it makes. "Synthesis runs offline" stays true during that download in
+# a way "everything runs locally" would not.
+st.caption(
+    "Press Play on any voice to hear your text — Play stays greyed out until you "
+    "enter some. Synthesis runs offline on this Mac."
+)
+
+# Labeled and fixed-width, not the stretched default. At layout="wide" a
+# stretched selectbox spans the whole viewport directly under the title, where it
+# reads as a banner rather than as the app's primary control; a bare value with no
+# label compounds that. 320px comfortably clears the longest option ("Brazilian
+# Portuguese"), and st.selectbox takes only "stretch" or an int — there is no
+# fit-to-content width to use instead.
 language = st.selectbox(
     "Language",
     options=list(LANGUAGES.keys()),
-    label_visibility="collapsed",
+    width=320,
     key="language",
 )
 lang_code = LANGUAGES[language]
@@ -668,8 +700,17 @@ with controls_col:
             # into a plain key and fed back through `expanded`. Widget state wins
             # over `expanded` whenever the key survives, so this only takes
             # effect on the runs that actually lost it.
+            # The label carries the tail size because "Show all voices" says a
+            # tail exists but not that it is 14 of 20. Note this makes the label
+            # track the gender filter, and st.expander hashes `label` into its
+            # element id (layouts.py computes it with key_as_main_identity=False
+            # and both `label` and `expanded` as inputs), so the widget identity
+            # now churns on filter changes too. That is safe only because
+            # `expanded` is in the same hash, so identity already churned on
+            # every open and close, and the mirror below is what carries the
+            # state across it.
             more_voices = st.expander(
-                "Show all voices",
+                f"Show all voices ({len(hidden)} more)",
                 icon=":material/library_music:",
                 on_change="rerun",
                 key="show_all_voices",
