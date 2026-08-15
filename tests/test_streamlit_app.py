@@ -351,25 +351,24 @@ class TestGenerateOne:
         model.generate.return_value = [chunk]
         return model
 
-    def _mock_tokenizer(self, phonemes: str = "hɛlˈoʊ") -> None:
-        from misaki import en
-
-        en.G2P.return_value = MagicMock(return_value=(phonemes, None))  # ty: ignore[unresolved-attribute]
-
     def test_returns_voice_result(self) -> None:
-        self._mock_tokenizer()
         model = self._model()
         result = generate_one("hi", "af_heart", model, 1.0, "a")
         assert result["voice"] == "af_heart"
 
-    def test_phonemes_included(self) -> None:
-        self._mock_tokenizer("test phonemes")
-        model = self._model()
-        result = generate_one("hi", "af_heart", model, 1.0, "a")
-        assert result["phonemes"] == "test phonemes"
+    def test_does_not_build_a_tokenizer(self) -> None:
+        # generate_one must not run G2P. mlx-audio's pipeline runs its own inside
+        # `generate`, so a pass here is a second one, and on a Play with no prior
+        # Tokenize it builds this app's whole G2P stack on the click path
+        # (measured ~1.4 s) to fill a field that was never read. Restoring the
+        # `tokenize_text` call fails this.
+        from misaki import en
+
+        en.G2P.reset_mock()  # ty: ignore[unresolved-attribute]
+        generate_one("hi", "af_heart", self._model(), 1.0, "a")
+        en.G2P.assert_not_called()  # ty: ignore[unresolved-attribute]
 
     def test_audio_concatenated(self) -> None:
-        self._mock_tokenizer()
         model = MagicMock()
         c1, c2 = MagicMock(), MagicMock()
         c1.audio = np.ones(50, dtype=np.float32)
@@ -383,7 +382,6 @@ class TestGenerateOne:
         )
 
     def test_passes_speed_and_lang(self) -> None:
-        self._mock_tokenizer()
         model = self._model()
         generate_one("hi", "af_heart", model, 1.5, "b")
         model.generate.assert_called_with(
@@ -394,7 +392,6 @@ class TestGenerateOne:
         # Locks the end-to-end "No audio generated" propagation that the card's
         # ValueError -> st.error branch depends on (match pins the exact message,
         # so a refactor letting np.concatenate([]) raise instead would fail).
-        self._mock_tokenizer()
         model = MagicMock()
         chunk = MagicMock()
         chunk.audio = None
@@ -541,7 +538,6 @@ class TestEvictOldAudio:
             st.session_state[f"audio:v{i}:a:1.0:{i}"] = {
                 "wav": _WAV,
                 "voice": f"v{i}",
-                "phonemes": "x",
                 "seq": i,
             }
 
@@ -601,7 +597,6 @@ class TestEvictOldAudio:
             st.session_state[f"audio:v{i}:a:1.0:{i}"] = {
                 "wav": _WAV,
                 "voice": f"v{i}",
-                "phonemes": "x",
                 "seq": n - i,  # last-inserted v{n-1} has the lowest seq (=1)
             }
         _evict_old_audio()
@@ -675,7 +670,6 @@ class TestFindStaleCachedAudio:
         payload = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         st.session_state[key] = payload
         assert _find_stale_cached_audio("af_heart", "hello", "a") is payload
@@ -687,7 +681,6 @@ class TestFindStaleCachedAudio:
         st.session_state[key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         assert _find_stale_cached_audio("af_heart", "world", "a") is None
         self._clear_audio_cache()
@@ -698,7 +691,6 @@ class TestFindStaleCachedAudio:
         st.session_state[key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         assert _find_stale_cached_audio("af_bella", "hello", "a") is None
         self._clear_audio_cache()
@@ -709,7 +701,6 @@ class TestFindStaleCachedAudio:
         st.session_state[key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         assert _find_stale_cached_audio("af_heart", "hello", "b") is None
         self._clear_audio_cache()
@@ -724,13 +715,11 @@ class TestFindStaleCachedAudio:
         st.session_state[key_15] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 2,
         }
         st.session_state[key_07] = {
             "wav": _WAV_ALT,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
@@ -749,13 +738,11 @@ class TestFindStaleCachedAudio:
         st.session_state[key_07] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 2,
         }
         st.session_state[key_15] = {
             "wav": _WAV_ALT,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 1,
         }
         result = _find_stale_cached_audio("af_heart", "hello", "a")
@@ -796,7 +783,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
@@ -808,7 +794,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 0.7, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
@@ -820,7 +805,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "different_text", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
@@ -830,7 +814,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_bella", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_bella",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
@@ -861,14 +844,12 @@ class TestRenderVoiceCard:
         st.session_state[current] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 1,
         }
         newer_other_speed = _cache_key("af_heart", "hello", 0.7, "a")
         st.session_state[newer_other_speed] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 2,  # higher seq than the current-speed take
         }
         render_voice_card("af_heart", "hello", "a")
@@ -889,7 +870,6 @@ class TestRenderVoiceCard:
         st.session_state[stale] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 1,
         }
         render_voice_card("af_heart", "hello", "a")
@@ -931,7 +911,6 @@ class TestRenderVoiceCard:
         st.session_state[key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "hɛlˈoʊ",
         }
         render_voice_card("af_heart", "hello", "a")
         st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
@@ -950,7 +929,6 @@ class TestRenderVoiceCard:
         st.session_state[key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         args, kwargs = st.audio.call_args  # ty: ignore[unresolved-attribute]
@@ -969,7 +947,6 @@ class TestRenderVoiceCard:
         st.session_state[old_key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
@@ -985,12 +962,10 @@ class TestRenderVoiceCard:
         st.session_state[fresh_key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         st.session_state[stale_key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.audio.assert_called_once()  # ty: ignore[unresolved-attribute]
@@ -1018,7 +993,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.download_button.assert_called_once()  # ty: ignore[unresolved-attribute]
@@ -1028,7 +1002,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
@@ -1043,7 +1016,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
@@ -1057,7 +1029,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 1.0, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         kwargs = st.download_button.call_args[1]  # ty: ignore[unresolved-attribute]
@@ -1069,7 +1040,6 @@ class TestRenderVoiceCard:
         st.session_state[_cache_key("af_heart", "hello", 0.7, "a")] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.download_button.assert_not_called()  # ty: ignore[unresolved-attribute]
@@ -1085,7 +1055,6 @@ class TestRenderVoiceCard:
         fake_result = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "hɛlˈoʊ",
         }
         with (
             patch(
@@ -1164,7 +1133,6 @@ class TestRenderVoiceCard:
         fake_result = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         with (
             patch("streamlit_app.load_pipeline"),
@@ -1191,14 +1159,12 @@ class TestRenderVoiceCard:
         st.session_state[stale] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
             "seq": 1,
         }
         current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
         fake_result = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         with (
             patch("streamlit_app.load_pipeline"),
@@ -1218,7 +1184,6 @@ class TestRenderVoiceCard:
         st.session_state[old_key] = {
             "wav": _WAV,
             "voice": "af_heart",
-            "phonemes": "x",
         }
         render_voice_card("af_heart", "hello", "a")
         st.audio.assert_not_called()  # ty: ignore[unresolved-attribute]

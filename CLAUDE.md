@@ -115,10 +115,11 @@ Three decisions that are easy to undo by accident:
 
 ### Key Functions
 
-Only the entries with a non-obvious contract are listed; the rest of `streamlit_app.py` (`get_voices`, `load_tokenizer`, `_create_g2p`, `tokenize_text`, `generate_speech`, `generate_one`, `_format_voice`, `_filter_voices_by_gender`, `_gender_code_from_selection`, `_audio_to_wav_bytes`, `render_phonemes`, `_render_persistent_phonemes`, `_render_length_caption`, `_load_sample`, `_render_sample_buttons`) does what its name says.
+Only the entries with a non-obvious contract are listed; the rest of `streamlit_app.py` (`get_voices`, `load_tokenizer`, `_create_g2p`, `tokenize_text`, `generate_speech`, `_format_voice`, `_filter_voices_by_gender`, `_gender_code_from_selection`, `_audio_to_wav_bytes`, `render_phonemes`, `_render_persistent_phonemes`, `_render_length_caption`, `_load_sample`, `_render_sample_buttons`) does what its name says.
 
 - `load_pipeline` — cached global model via `mlx_audio.tts.utils.load_model`, deferred to the first Play click. **Must set `model.repo_id = REPO_ID` before returning:** mlx-audio's loader builds `Model(config)` without forwarding a repo id, so `Model.repo_id` stays `None` and its `_get_pipeline` falls back to the class constant `REPO_ID = "prince-canuma/Kokoro-82M"` when it creates (and caches) each per-language `KokoroPipeline`. Unpinned, every voice's first Play re-downloads a tensor already present in our snapshot and raises a raw `RuntimeError` when offline. Guarded by `TestLoadPipeline.test_pins_voice_repo_to_our_snapshot`.
 - `ensure_repo_downloaded` — `huggingface_hub.snapshot_download` once per process; tries `local_files_only=True` first so the ~355 MB spinner appears only when files are actually missing.
+- `generate_one` — **deliberately does not tokenize.** mlx-audio's `KokoroPipeline` builds its own G2P and runs it inside `pipeline.generate` (`pipeline.py:152`), so a pass here is a second one over the same text; on a Play with no prior Tokenize it also built this app's whole G2P stack (spaCy + the espeak fallback) on the click path and kept that duplicate resident for the session. Measured ~1.4 s of the first Play, spent filling a `VoiceResult["phonemes"]` field that nothing read — hence no such field. Phonemes reach the UI only via the Tokenize button and `st.session_state["last_phonemes"]`. Guarded by `TestGenerateOne.test_does_not_build_a_tokenizer`.
 - `_tokenize_error_message` — friendly text for a Tokenize failure. `lang_code == "j"` plus "unidic" in the error returns the `uv run python -m unidic download` recovery command (the dictionary lives in the venv and vanishes on any rebuild); everything else gets `Could not tokenize this text: {error}`. The hint is Japanese-only on purpose — `TestTokenizeErrorMessage` fails if another language claims it.
 - `_text_digest` — stable 16-hex-char `hashlib.sha1` digest, so cache keys are reproducible across processes (unlike the previously used `hash()`, which is per-process randomized).
 - `_cache_key` — `f"audio:{voice}:{lang_code}:{speed}:{_text_digest(text)}"`. Cache invalidates implicitly when any of voice/text/speed/lang changes.
@@ -144,7 +145,7 @@ Voice files are named `{lang}{gender}_{name}` (e.g. `af_heart`) with a `.safeten
 
 - MLX runs natively on Apple Silicon — no PyTorch or MPS fallback.
 - `@st.cache_resource` for the model, the per-language tokenizers, and the snapshot path; `@st.cache_data` for per-language voice lists (a local filesystem walk, no TTL needed).
-- Model load is deferred to the first Play click, so initial render isn't blocked.
+- Model load is deferred to the first Play click, so initial render isn't blocked. That click builds **one** G2P stack, not two — see `generate_one`.
 - `generate_speech` uses `np.asarray(..., dtype=np.float32)` to avoid copying chunks that are already float32.
 - `render_voice_card` being a fragment means a Play click reruns one card, not the script. One accepted trade-off: a sibling card's cached badge refreshes on the next full rerun, not instantly.
 - The "Show all voices" expander is lazily gated, so a collapsed tail costs nothing per rerun. The trade-off is the reverse of the usual one: *opening* it now costs a server rerun where it used to be a pure frontend toggle. Worth it, because opening is rare and reruns are constant.

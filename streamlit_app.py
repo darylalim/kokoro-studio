@@ -23,11 +23,16 @@ class VoiceResult(TypedDict):
     converts to int16, writes a WAV and hashes it). Encoding once at generation
     keeps that off every rerun, and int16 WAV is smaller than the float32 array
     it replaces, so the cache holds `AUDIO_CACHE_LIMIT` clips in less memory.
+
+    There is deliberately **no** `phonemes` field. It existed, was written on
+    every generation, and was read by nothing: the card renders `wav` and the
+    Download button serves `wav`. Filling it cost a whole second G2P stack on
+    the click path — see `generate_one`. Phonemes reach the UI through the
+    Tokenize button and `st.session_state["last_phonemes"]` instead.
     """
 
     wav: bytes
     voice: str
-    phonemes: str
     seq: NotRequired[int]
 
 
@@ -427,7 +432,12 @@ def generate_one(
     speed: float,
     lang_code: str,
 ) -> VoiceResult:
-    phonemes = tokenize_text(text, lang_code)
+    # Deliberately does not tokenize. mlx-audio's KokoroPipeline builds its own
+    # G2P and runs it inside `pipeline.generate`, so a pass here is a second one
+    # over the same text — and on a Play with no prior Tokenize it also builds
+    # this app's own G2P stack (spaCy + the espeak fallback) on the click path,
+    # then holds that duplicate resident for the session. Measured ~1.4 s of the
+    # first Play, spent to fill a `VoiceResult` field nothing read.
     with st.status(f"Generating {voice}...", expanded=True) as status:
         chunks = []
         for i, chunk in enumerate(
@@ -439,7 +449,6 @@ def generate_one(
     return {
         "wav": _audio_to_wav_bytes(np.concatenate(chunks)),
         "voice": voice,
-        "phonemes": phonemes,
     }
 
 
