@@ -1,18 +1,44 @@
 import os
 import sys
 import tempfile
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
+
+# Options the app passed to each Streamlit decorator, recorded as it was
+# applied: {decorator name: {decorated function name: kwargs}}. The shim below
+# has to swallow those kwargs to hand the bare function back, which leaves a
+# test no other way to see them — and `show_spinner` in particular is a
+# deliberate per-function setting, not a default. See TestCacheSpinners.
+DECORATOR_KWARGS: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def _passthrough_decorator(name: str) -> Callable[..., Any]:
+    """Return a shim for one Streamlit decorator that hands the function back.
+
+    Streamlit's decorators are used in two shapes and the app uses both:
+    `@st.cache_resource` applies the decorator straight to the function, while
+    `@st.cache_resource(show_spinner=...)` calls it first and applies what it
+    returns. So the shim must accept being handed either the function or the
+    options — and it records the options on the way past.
+    """
+    recorded = DECORATOR_KWARGS.setdefault(name, {})
+
+    def decorator(*args: Any, **kwargs: Any) -> Any:
+        def apply(func: Any) -> Any:
+            recorded[func.__name__] = kwargs
+            return func
+
+        return apply(args[0]) if args else apply
+
+    return decorator
+
 
 # Mock streamlit to prevent UI initialization on import
 _st = MagicMock()
-# Both cache decorators must pass the decorated function through unchanged and
-# accept the bare `@st.cache_resource` and parametrized `@st.cache_resource(...)`
-# forms — the app uses both, to set show_spinner per function.
-_st.cache_resource = lambda *args, **_kw: args[0] if args else (lambda f: f)
-_st.cache_data = lambda *args, **_kw: args[0] if args else (lambda f: f)
-# @st.fragment must pass the decorated function through unchanged, supporting
-# both bare `@st.fragment` and parametrized `@st.fragment(...)` forms.
-_st.fragment = lambda func=None, **_kw: func if func is not None else (lambda g: g)
+_st.cache_resource = _passthrough_decorator("cache_resource")
+_st.cache_data = _passthrough_decorator("cache_data")
+_st.fragment = _passthrough_decorator("fragment")
 _st.selectbox.side_effect = lambda label, **_kw: {
     "Language": "American English",
     "Speed": 1.0,

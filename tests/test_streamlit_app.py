@@ -1,10 +1,11 @@
 from pathlib import Path
 from typing import Any, ClassVar
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
 import streamlit as st
+from conftest import DECORATOR_KWARGS
 
 from streamlit_app import (
     _PHONEME_MULTIPLIERS,
@@ -147,6 +148,43 @@ class TestLoadPipeline:
         # `prince-canuma/Kokoro-82M` for voice tensors, re-downloading voices
         # already in our snapshot and breaking the offline guarantee.
         assert load_pipeline().repo_id == REPO_ID
+
+
+class TestCacheSpinners:
+    """Every `@st.cache_resource` site must choose its own `show_spinner`.
+
+    The default renders ``Running `load_pipeline()`.`` — a Python identifier —
+    and it does so at exactly the three moments the app makes someone wait.
+    Nothing else can catch a dropped setting: the conftest shim has to swallow
+    decorator kwargs to hand the function back, so it records them instead.
+    """
+
+    _RESOURCES: ClassVar[dict[str, dict[str, Any]]] = DECORATOR_KWARGS["cache_resource"]
+
+    def test_covers_every_cached_resource(self) -> None:
+        # A new @st.cache_resource site fails here until it is considered.
+        assert set(self._RESOURCES) == {
+            "ensure_repo_downloaded",
+            "load_pipeline",
+            "load_tokenizer",
+        }
+
+    def test_every_cached_resource_sets_show_spinner(self) -> None:
+        for name, kwargs in self._RESOURCES.items():
+            assert "show_spinner" in kwargs, (
+                f"{name} takes the default spinner, which names the function"
+            )
+
+    def test_download_guard_suppresses_the_spinner(self) -> None:
+        # False rather than a sentence: ensure_repo_downloaded renders its own
+        # progress message, so a second one would stack on top of it.
+        assert self._RESOURCES["ensure_repo_downloaded"]["show_spinner"] is False
+
+    def test_waits_the_user_sees_are_worded_for_the_user(self) -> None:
+        for name in ("load_pipeline", "load_tokenizer"):
+            spinner = self._RESOURCES[name]["show_spinner"]
+            assert isinstance(spinner, str) and spinner, f"{name} shows no message"
+            assert name not in spinner, f"{name} leaks its identifier into the UI"
 
 
 class TestCreateG2p:
@@ -765,17 +803,75 @@ class TestRenderVoiceCard:
         for k in list(st.session_state):
             if isinstance(k, str) and k.startswith("audio:"):
                 del st.session_state[k]
+        # Rendering a card writes both of these, so clearing them here is what
+        # keeps the class order-independent: a test that reads the protect map
+        # must see what its own run registered, not what a predecessor left.
+        st.session_state.pop("_displayed_card_keys", None)
+        st.session_state.pop("_audio_seq", None)
 
-    def test_renders_bordered_container(self) -> None:
+    def test_opens_its_own_containers_in_order(self) -> None:
         # Opened inside the fragment, not passed in: a shared container would
-        # make every card one fragment instance. assert_any_call, not
-        # assert_called_once_with: the card also opens a second, borderless
-        # container reserving the title slot (see test_badge_appears_on_the_run
-        # _that_generates), so pinning the count here would fail for a reason
-        # that has nothing to do with what this test is about.
+        # make every card one fragment instance. The whole *sequence* is
+        # asserted rather than `assert_any_call(border=True)`, because `st`
+        # here is one MagicMock: `st.container(border=True)` and the bare
+        # `st.container()` return the identical object, so nothing downstream
+        # can tell which is which. Call order is the only distinguishing
+        # signal, which makes this equality the guard for two claims at once —
+        # that the border lands on the card and not the title slot, and that
+        # the title slot is reserved at all (its content is written last, see
+        # test_badge_appears_on_the_run_that_generates). Both mutations pass
+        # under `assert_any_call`.
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.container.assert_any_call(border=True)  # ty: ignore[unresolved-attribute]
+        assert st.container.call_args_list == [  # ty: ignore[unresolved-attribute]
+            call(border=True),
+            call(),
+        ]
+
+    def test_title_is_written_into_the_reserved_slot(self) -> None:
+        # The sequence test above cannot see this one: dedenting the title out
+        # of `with title_slot:` so it renders at the bottom of the card changes
+        # no call argument and no call order, and the shared `st` MagicMock
+        # hands back the same object for both containers. The only observable
+        # difference is *which container is open* when `st.markdown` runs, so
+        # this gives the containers a real enter/exit that pushes and pops a
+        # stack and captures that frame as the title is written.
+        self._reset_mocks()
+        stack: list[MagicMock] = []
+        opened: list[MagicMock] = []
+        frames: list[tuple[str, tuple[MagicMock, ...]]] = []
+
+        def _make_container(**_kw: Any) -> MagicMock:
+            # Named, so a failure reads `(card,) != (card, title_slot)` rather
+            # than a pair of MagicMock ids.
+            names = ("card", "title_slot")
+            n = len(opened)
+            cm = MagicMock(name=names[n] if n < len(names) else f"container{n}")
+
+            def _enter() -> MagicMock:
+                stack.append(cm)
+                return cm
+
+            def _exit(*_a: Any) -> bool:
+                stack.pop()
+                return False
+
+            cm.__enter__.side_effect = _enter
+            cm.__exit__.side_effect = _exit
+            opened.append(cm)
+            return cm
+
+        def _record(body: str, **_kw: Any) -> None:
+            frames.append((body, tuple(stack)))
+
+        with (
+            patch.object(st, "container", side_effect=_make_container),
+            patch.object(st, "markdown", side_effect=_record),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+
+        card, title_slot = opened
+        assert frames == [("**Heart (female) — A**", (card, title_slot))]
 
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
@@ -843,7 +939,6 @@ class TestRenderVoiceCard:
         # _stale_cached_key would otherwise prefer by seq). This discriminates the
         # `key if key in st.session_state` branch from a buggy `stale_key or key`.
         self._reset_mocks()
-        st.session_state.pop("_displayed_card_keys", None)
         current = _cache_key("af_heart", "hello", 1.0, "a")  # conftest speed = 1.0
         st.session_state[current] = {
             "wav": _WAV,
@@ -869,7 +964,6 @@ class TestRenderVoiceCard:
         # the (uncached) current-speed key, or a sibling's Play could evict the
         # audio this card is actively displaying.
         self._reset_mocks()
-        st.session_state.pop("_displayed_card_keys", None)
         stale = _cache_key("af_heart", "hello", 0.7, "a")  # not the current 1.0
         st.session_state[stale] = {
             "wav": _WAV,
@@ -1177,7 +1271,6 @@ class TestRenderVoiceCard:
         # pre-Play stale key registered at render time — else a sibling's eviction
         # could orphan the freshly generated take.
         self._reset_mocks()
-        st.session_state.pop("_displayed_card_keys", None)
         st.button.return_value = True  # ty: ignore[unresolved-attribute]
         stale = _cache_key("af_heart", "hello", 0.7, "a")  # prior take, other speed
         st.session_state[stale] = {
@@ -1709,7 +1802,7 @@ class TestRenderSampleButtons:
     def test_button_keys_are_language_and_filename_scoped(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        keys = [call.kwargs.get("key") for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
+        keys = [c.kwargs.get("key") for c in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         assert "sample_a_random" in keys
         assert "sample_a_gatsby" in keys
         assert "sample_a_frankenstein" in keys
@@ -1717,13 +1810,13 @@ class TestRenderSampleButtons:
     def test_button_uses_on_click_callback(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        for call in st.button.call_args_list:  # ty: ignore[unresolved-attribute]
-            assert call.kwargs.get("on_click") is _set_text_from_sample
+        for c in st.button.call_args_list:  # ty: ignore[unresolved-attribute]
+            assert c.kwargs.get("on_click") is _set_text_from_sample
 
     def test_button_args_match_entry(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
-        seen_args = [call.kwargs.get("args") for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
+        seen_args = [c.kwargs.get("args") for c in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         expected = [("a", b.filename, b.is_random) for b in SAMPLE_BUTTONS["a"]]
         assert seen_args == expected
 
@@ -1743,7 +1836,7 @@ class TestRenderSampleButtons:
     def test_button_labels_use_localized_text(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("j")
-        labels = [call.args[0] for call in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
+        labels = [c.args[0] for c in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
         assert any("こころ" in label for label in labels)
 
 
