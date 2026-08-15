@@ -7,7 +7,7 @@ app, then run this through `uvx`:
     uv run streamlit run streamlit_app.py --server.headless true &
     uvx --with playwright python scripts/capture_screenshot.py
 
-This is a script rather than a paragraph of instructions because all seven ways
+This is a script rather than a paragraph of instructions because all eight ways
 it goes wrong produce a *plausible but wrong image* instead of an error:
 
 * `embed_options=dark_theme` is a no-op, so dark mode is forced by emulating the
@@ -34,6 +34,12 @@ it goes wrong produce a *plausible but wrong image* instead of an error:
   element to either column was enough to get within 20px of that. `crop_height`
   now raises instead, so the failure is loud and `HEIGHT` is the one number to
   raise when the layout legitimately grows.
+* That guard only covers the page outgrowing the *viewport*. The crop is taken
+  at `CROP_ANCHORS`, so content added *below* an anchor is cropped away just as
+  quietly and passes every check above — the anchor is still found and the
+  height is still under `HEIGHT`. `crop_height` therefore measures the real
+  content bottom (`content_bottom`) and refuses if anything sits under the crop
+  line, which is also what catches an anchor going stale.
 
 `embed=true` drops the Deploy/⋮ toolbar; `show_padding` restores the top margin
 that embed mode strips.
@@ -67,6 +73,27 @@ GENERATION_TIMEOUT_MS = 240_000
 
 # Cards drawn outside the expander — `_split_voices_for_display`'s `top_n`.
 EXPECTED_VISIBLE_CARDS = 6
+
+# Leaves only, for the reason `content_bottom` gives. Zero-area and hidden
+# elements are skipped so `<script>`, `<style>` and collapsed nodes don't
+# report a bottom; `display:none` is already covered, since it zeroes the rect.
+# The page is never scrolled, so viewport coordinates are document coordinates
+# — the same frame `bounding_box()` reports the anchors in.
+_CONTENT_BOTTOM = """
+() => {
+  const root = document.querySelector('.stMainBlockContainer') || document.body;
+  let bottom = 0;
+  for (const el of root.querySelectorAll('*')) {
+    if (el.children.length > 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || s.opacity === '0') continue;
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return bottom;
+}
+"""
 
 # Every card carries exactly one Play button, so counting them counts cards.
 _PLAY_BUTTON_COUNT = (
@@ -128,6 +155,16 @@ def drive(page: Page) -> None:
     wait_for_cards(page)
 
 
+def content_bottom(page: Page) -> float:
+    """The true bottom of rendered content, measured off leaf elements.
+
+    `.stMainBlockContainer`'s own box overshoots by its bottom padding, which is
+    why the crop is anchored rather than measured off the container. A leaf has
+    no children to pad around, so the lowest leaf bottom is the real one.
+    """
+    return page.evaluate(_CONTENT_BOTTOM)
+
+
 def crop_height(page: Page) -> int:
     """Height that ends just below the last real element, not the container."""
     bottoms = []
@@ -142,6 +179,18 @@ def crop_height(page: Page) -> int:
             f"content is {height}px tall but the viewport is {HEIGHT}px; a "
             "non-full-page screenshot clips to the viewport, so this would have "
             f"shipped a hero cut off at {HEIGHT}px with no error. Raise HEIGHT."
+        )
+    # The anchors say where the columns *used* to end. Anything rendered below
+    # one of them is cropped away just as silently as overflowing the viewport
+    # is, and no step above notices — the anchor is still found, the height is
+    # still under HEIGHT. So measure the content independently and refuse.
+    reached = content_bottom(page)
+    if reached > height:
+        raise RuntimeError(
+            f"content reaches {round(reached)}px but the crop ends at {height}px, "
+            f"so {round(reached) - height}px would be cut off with no error. One "
+            f"of the crop anchors {CROP_ANCHORS} is no longer the bottom-most "
+            "element in its column — repoint it at whatever now is."
         )
     return height
 
