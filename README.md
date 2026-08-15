@@ -40,7 +40,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 **Languages & voices**
 
 - Nine languages: American & British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, and Mandarin Chinese.
-- Voice cards sorted by quality grade (best first). The grade is shown in the title where the model card provides one (e.g. "Heart (female) — A"); ungraded voices (Spanish and Brazilian Portuguese) show just "Name (gender)" and sort after the graded ones. The top 6 are visible, the rest sit behind a "Show all voices" expander.
+- Voice cards sorted by quality grade (best first). The grade is shown in the title where the model card provides one (e.g. "Heart (female) — A"); ungraded voices (Spanish and Brazilian Portuguese) show just "Name (gender)" and sort after the graded ones. The top 6 are visible, the rest sit behind a "Show all voices (N more)" expander.
 - Gender filter via a single segmented control (All / Female / Male), defaulting to All.
 
 **Generation & playback**
@@ -97,7 +97,7 @@ uv run python -m unidic download
 2. Type or paste text into the box — or click a sample button (a random quote plus two literary excerpts) to seed it.
 3. *(Optional)* Click **Tokenize** to preview the phoneme tokens. The colored caption tells you whether the text is too short, ideal length, or long enough to be chunked.
 4. *(Optional)* Filter the voices by gender (All / Female / Male).
-5. Pick a voice card — the top 6 by quality grade are shown directly, with the rest behind **Show all voices**.
+5. Pick a voice card — the top 6 by quality grade are shown directly, with the rest behind **Show all voices (N more)**, where N counts what the current gender filter leaves in the tail.
 6. Choose a playback speed (0.7x–1.5x).
 7. Click **Play**. Generation progress appears inline, and the audio player shows up in the card when it's done.
 8. Play other cards to A/B-compare voices on the same text (a **Cached** badge marks cards that already have audio), and use **Download** to save any clip as a WAV.
