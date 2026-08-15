@@ -97,7 +97,7 @@ def drive(page: Page) -> None:
     page.get_by_role("button", name="Tokenize").click()
     # Not "text=Phonemes": that substring-matches the length caption, which is
     # already on screen. Wait for the expander, then for tokens inside it.
-    page.wait_for_selector("text=Phoneme Tokens", timeout=60_000)
+    page.wait_for_selector("text=Phoneme tokens", timeout=60_000)
     page.wait_for_selector('[data-testid="stCode"]', timeout=60_000)
     page.wait_for_timeout(1_200)
 

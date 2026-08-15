@@ -112,7 +112,7 @@ class TestTokenizeFlow:
         assert lang == "a"
         assert phonemes
         expander_labels = [e.label for e in at.expander]
-        assert "Phoneme Tokens" in expander_labels
+        assert "Phoneme tokens" in expander_labels
         assert phonemes in [c.value for c in at.code]
 
 

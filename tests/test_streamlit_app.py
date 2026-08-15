@@ -1220,13 +1220,13 @@ class TestRenderPhonemes:
         st.expander.reset_mock()  # ty: ignore[unresolved-attribute]
         st.code.reset_mock()  # ty: ignore[unresolved-attribute]
         render_phonemes("hɛlˈoʊ")
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=False)  # ty: ignore[unresolved-attribute]
+        st.expander.assert_called_once_with("Phoneme tokens", expanded=False)  # ty: ignore[unresolved-attribute]
         st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_expanded_flag_forwarded(self) -> None:
         st.expander.reset_mock()  # ty: ignore[unresolved-attribute]
         render_phonemes("x", expanded=True)
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # ty: ignore[unresolved-attribute]
+        st.expander.assert_called_once_with("Phoneme tokens", expanded=True)  # ty: ignore[unresolved-attribute]
 
 
 class TestRenderPersistentPhonemes:
@@ -1245,7 +1245,7 @@ class TestRenderPersistentPhonemes:
         self._reset_mocks()
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("hello", "a")
-        st.expander.assert_called_once_with("Phoneme Tokens", expanded=True)  # ty: ignore[unresolved-attribute]
+        st.expander.assert_called_once_with("Phoneme tokens", expanded=True)  # ty: ignore[unresolved-attribute]
         st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_no_render_when_text_differs(self) -> None:

@@ -576,7 +576,7 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
 
 
 def render_phonemes(phonemes: str, *, expanded: bool = False) -> None:
-    with st.expander("Phoneme Tokens", expanded=expanded):
+    with st.expander("Phoneme tokens", expanded=expanded):
         st.code(phonemes)
 
 
