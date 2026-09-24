@@ -1,20 +1,16 @@
 {
   "permissions": {
     "deny": [
-      "Edit(uv.lock)",
-      "Write(uv.lock)",
-      "MultiEdit(uv.lock)"
+      "Edit(uv.lock)"
     ],
     "ask": [
-      "Edit(.python-version)",
-      "Write(.python-version)",
-      "MultiEdit(.python-version)"
+      "Edit(.python-version)"
     ]
   },
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
