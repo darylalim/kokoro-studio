@@ -42,9 +42,11 @@ jobs:
           # GitHub's 10 GB per-repo quota, at the cost of uv sync re-fetching
           # wheels from PyPI rather than reading them back from the cache.
           prune-cache: true
-          # Pin uv itself so `--locked` is evaluated by the same version used
-          # locally (see .venv/pyvenv.cfg). Bump when the local uv is upgraded.
-          version: "0.11.21"
+          # Pin uv itself so `--locked` is evaluated by the same version that
+          # writes uv.lock locally -- `uv --version`, not .venv/pyvenv.cfg, whose
+          # `uv =` line only records the uv that created the venv. Bump when the
+          # local uv is upgraded.
+          version: "0.12.18"
           python-version: "3.12"
 
       # --locked installs exactly from uv.lock AND fails if the lock has drifted
