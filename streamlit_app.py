@@ -506,9 +506,11 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                 # not draw. Without this a tail voice's speed snapped back to 1.0x
                 # on reopen — and because _cache_key includes the speed, that also
                 # demoted its generated clip to a "speed changed" stale preview.
-                # "session" is required: "page" measurably does not hold the value
-                # here, its scope being page navigation rather than a widget going
-                # unrendered within one page.
+                # "session", not "page": Streamlit documents "page" as covering a
+                # hidden widget too, and in a browser it holds here as well, but
+                # AppTest builds a fresh PagesManager per run, so every run reads
+                # as a page switch and "page" drops the value. Only "session" is
+                # visible to the guard test; in a single-page app they're the same.
                 persist_state="session",
             )
         with play_col:
@@ -680,7 +682,7 @@ with input_col:
     _render_length_caption(text_input, lang_code)
     _render_persistent_phonemes(text_input, lang_code)
     # A bordered container, not st.info. The alert component renders
-    # role="status" for non-error kinds, i.e. an ARIA live region, which asks a
+    # role="status" for info and success, i.e. an ARIA live region, which asks a
     # screen reader to announce this as a status update; the note is permanent
     # reference content that belongs in the normal reading order. A bordered
     # container groups it just as well with no announcement semantics.
@@ -716,7 +718,7 @@ with controls_col:
             # for American English that is 14 extra voice cards, each with a
             # session_state scan and three widgets, rebuilt on every rerun.
             # Opening now costs one rerun; every other rerun stops paying for it.
-            # Keying the expander makes it a widget, so its open state is subject
+            # `on_change` makes the expander a widget, so its open state is subject
             # to the same collection as any other: a language or filter leaving
             # six voices or fewer skips this branch entirely, Streamlit drops
             # `show_all_voices`, and coming back finds the expander shut. That is

@@ -1089,9 +1089,10 @@ class TestRenderVoiceCard:
         Cards inside the collapsed "Show all voices" expander are not drawn, and
         Streamlit discards the state of any widget a run skipped. Losing it sends
         the card back to 1.0x on reopen and — since `_cache_key` includes the
-        speed — demotes its clip to a stale preview. Only "session" holds the
-        value; "page" was measured not to (its scope is page navigation).
-        `tests_integration` exercises the real collapse/reopen cycle.
+        speed — demotes its clip to a stale preview. "page" holds it too in a
+        browser, but AppTest builds a fresh PagesManager per run, so every run
+        reads as a page switch and resets it. So only "session" passes
+        `tests_integration`, which exercises the real collapse/reopen cycle.
         """
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")

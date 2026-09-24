@@ -166,9 +166,10 @@ class TestVoiceCards:
         # American English's 20 voices meant 14 surplus cards — each a
         # session_state scan and three widgets — on every rerun.
         at = _run_app()
-        # Setting on_change makes the expander a widget rather than a plain
-        # block, so it lands in session_state and NOT in at.expander. Reading it
-        # here is what pins the lazy behaviour: no key means no `.open` gating.
+        # Setting on_change makes the expander a widget, so its open state lands
+        # in session_state. (It is missing from at.expander only because of its
+        # icon: AppTest files any expander with an icon under at.status.) Reading
+        # it here is what pins the lazy behaviour: no key means no `.open` gating.
         assert at.session_state["show_all_voices"] is False
         assert len(_voice_titles(at)) == 6
         assert len([b for b in at.button if b.label == "Play"]) == 6
@@ -218,7 +219,7 @@ class TestVoiceCards:
         assert len([b for b in at.button if b.label == "Play"]) == 9
 
     def test_expander_stays_open_across_a_language_with_no_hidden_voices(self) -> None:
-        # Keying the expander turned its open state into ordinary widget state,
+        # on_change turned the expander's open state into ordinary widget state,
         # which Streamlit collects on any run that does not draw it. Japanese has
         # five voices, so `hidden` is empty, the expander is never created, and
         # `show_all_voices` disappears — English then came back collapsed. The
