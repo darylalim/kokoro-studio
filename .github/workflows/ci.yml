@@ -34,7 +34,7 @@ jobs:
 
       # setup-uv stopped publishing floating major tags after v7, so this must
       # carry a full version -- `@v10` does not resolve.
-      - uses: astral-sh/setup-uv@v10.0.0
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
           # setup-uv v9 flipped this default to false, which saves the whole
