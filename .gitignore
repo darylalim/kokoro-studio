@@ -15,6 +15,12 @@ dist/
 .streamlit/*
 !.streamlit/config.toml
 
+# Streamlit's skills install (the app-load "Help agents write better apps" toast,
+# and since 1.62 an "Install skills" button under errors Streamlit itself raises)
+# links agent skills into the project: .agents/skills always, and .claude/skills
+# when Claude Code is detected — the latter already covered by `.claude/*` below
+.agents/
+
 # Claude Code — ignore per-user overrides, but ship the shared guardrails
 .claude/*
 !.claude/settings.json
