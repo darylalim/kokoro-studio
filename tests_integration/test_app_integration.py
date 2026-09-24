@@ -27,13 +27,13 @@ def _voice_titles(at: AppTest) -> list[str]:
 def _set_expander(at: AppTest, is_open: bool) -> None:
     """Open or close "Show all voices" the way a real click would.
 
-    The expander is keyed, so it carries widget state, and the app mirrors that
-    into a plain key to survive runs that never draw it. A click updates both;
-    setting only the widget key leaves the mirror disagreeing, and the mirror is
-    what feeds `expanded`.
+    A click sends only the widget value, never the app's `_show_all_voices_pref`
+    mirror, so only the widget key is set here. Writing the mirror as well is
+    what hid a lag in it that swallowed every second click in a real browser:
+    left to the app, `test_tail_voice_speed_survives_collapse_and_reopen` fails
+    against the lagging version.
     """
     at.session_state["show_all_voices"] = is_open
-    at.session_state["_show_all_voices_pref"] = is_open
 
 
 def _speed_keys(at: AppTest) -> set[str]:
@@ -179,6 +179,43 @@ class TestVoiceCards:
         at.run()
         assert not at.exception
         assert len(_voice_titles(at)) > 6
+
+    def test_every_click_toggles_the_expander(self) -> None:
+        # The expander's element id hashes `expanded`. Fed a mirror one run
+        # behind, the id changed on every second click and that click was lost.
+        at = _run_app()
+        for is_open in (True, False, True, False):
+            _set_expander(at, is_open)
+            at.run()
+            plays = len([b for b in at.button if b.label == "Play"])
+            assert (plays > 6) is is_open
+
+    def test_a_click_keeps_the_expanders_element_id(self) -> None:
+        # A new element id remounts the expander in the browser: keyboard focus
+        # fell to the page after every Enter, and a click sent under the old id
+        # before the new one arrived (a double click within ~50 ms) was dropped.
+        # Only a label change or a restore may re-seed it.
+        at = _run_app()
+        ids = [s.proto.id for s in at.status if "Show all voices" in s.label]
+        for is_open in (True, False, True):
+            _set_expander(at, is_open)
+            at.run()
+            ids += [s.proto.id for s in at.status if "Show all voices" in s.label]
+        assert len(ids) == 4
+        assert len(set(ids)) == 1
+
+    def test_a_filter_change_reseeds_the_expander(self) -> None:
+        # The label carries the tail size, so a filter change moves the element
+        # id, and a new id starts from `expanded`: without the re-seed the
+        # expander shut on every filter change. A browser resends the expander's
+        # value with every rerun, so restate it here; left out, AppTest drops the
+        # key and the collected-state re-seed hides a missing label re-seed.
+        at = _run_app()
+        _set_expander(at, True)
+        at.run()
+        _set_expander(at, True)
+        at.segmented_control(key="gender").set_value("Male").run()
+        assert len([b for b in at.button if b.label == "Play"]) == 9
 
     def test_expander_stays_open_across_a_language_with_no_hidden_voices(self) -> None:
         # Keying the expander turned its open state into ordinary widget state,

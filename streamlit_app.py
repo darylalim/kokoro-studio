@@ -714,24 +714,42 @@ with controls_col:
             # `show_all_voices`, and coming back finds the expander shut. That is
             # the bug `persist_state` fixes for the speed selectbox, but
             # st.expander has no such option, so the state is mirrored by hand
-            # into a plain key and fed back through `expanded`. Widget state wins
-            # over `expanded` whenever the key survives, so this only takes
-            # effect on the runs that actually lost it.
+            # into a plain key and fed back through `expanded`. The key's value
+            # is copied into the mirror first whenever it survives, so the
+            # mirror only decides on the runs that actually lost it.
             # The label carries the tail size because "Show all voices" says a
             # tail exists but not that it is 14 of 20. Note this makes the label
             # track the gender filter, and st.expander hashes `label` into its
             # element id (layouts.py computes it with key_as_main_identity=False
             # and both `label` and `expanded` as inputs), so the widget identity
-            # now churns on filter changes too. That is safe only because
-            # `expanded` is in the same hash, so identity already churned on
-            # every open and close, and the mirror below is what carries the
-            # state across it.
+            # now churns on filter changes too. `expanded` is in the same hash,
+            # and a new id starts from `expanded`, not from the click the browser
+            # sent under the old one. So `expanded` is re-seeded only on the runs
+            # that start the widget afresh anyway (the label moved, which moves
+            # the id, or its state was collected) and held still otherwise. Fed
+            # last run's open state, the id moved on every second click and that
+            # click was lost (1.61.1 and 1.64.0); fed this run's, it moved on
+            # every click, so every toggle remounted the expander: keyboard focus
+            # fell to the page, and a second click sent within ~50 ms, before the
+            # browser had the new id, was lost.
+            label = f"Show all voices ({len(hidden)} more)"
+            st.session_state["_show_all_voices_pref"] = st.session_state.get(
+                "show_all_voices", st.session_state.get("_show_all_voices_pref", False)
+            )
+            if (
+                "show_all_voices" not in st.session_state
+                or st.session_state.get("_show_all_voices_label") != label
+            ):
+                st.session_state["_show_all_voices_seed"] = st.session_state[
+                    "_show_all_voices_pref"
+                ]
+                st.session_state["_show_all_voices_label"] = label
             more_voices = st.expander(
-                f"Show all voices ({len(hidden)} more)",
+                label,
                 icon=":material/library_music:",
                 on_change="rerun",
                 key="show_all_voices",
-                expanded=st.session_state.get("_show_all_voices_pref", False),
+                expanded=st.session_state["_show_all_voices_seed"],
             )
             st.session_state["_show_all_voices_pref"] = bool(more_voices.open)
             if more_voices.open:
