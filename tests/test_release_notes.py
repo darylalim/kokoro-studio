@@ -68,6 +68,16 @@ class TestParseCommit:
         commit = parse_commit("a", "feat: rework", "BREAKING CHANGE: config moved")
         assert commit.breaking is True
 
+    def test_footer_after_other_body_lines_marks_breaking(self) -> None:
+        body = "Reworks the config loader.\n\nBREAKING-CHANGE: config moved"
+        assert parse_commit("a", "feat: rework", body).breaking is True
+
+    def test_prose_naming_the_trailer_is_not_breaking(self) -> None:
+        # 7757b45's body describes the feature -- "`BREAKING CHANGE:` trailers
+        # promote an entry" -- and a substring test flagged it as breaking.
+        body = "Scope is stripped.\n`BREAKING CHANGE:` trailers promote an entry"
+        assert parse_commit("a", "ci: build release notes", body).breaking is False
+
     def test_description_is_sentence_cased(self) -> None:
         assert parse_commit("a", "docs: add screenshots").description.startswith("Add")
 

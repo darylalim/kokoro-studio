@@ -47,6 +47,12 @@ _SUBJECT = re.compile(
     r"^(?P<type>[a-z]+)(?:\+[a-z]+)*(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?:\s*(?P<description>.+)$"
 )
 
+# A breaking-change footer, per the Conventional Commits spec: the token at the
+# start of a line. A bare substring test also matched prose that merely names
+# the trailer -- 7757b45's body explains "`BREAKING CHANGE:` trailers promote
+# ..." and was listed as a breaking change itself.
+_BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
+
 # Record/field separators chosen because git will never emit them itself, so a
 # commit message containing newlines (every body) cannot corrupt the split.
 _RECORD = "\x1e"
@@ -73,7 +79,7 @@ def parse_commit(sha: str, subject: str, body: str = "") -> Commit:
     headings = dict(SECTIONS)
     subject = subject.strip()
     match = _SUBJECT.match(subject)
-    breaking = "BREAKING CHANGE:" in body or "BREAKING-CHANGE:" in body
+    breaking = _BREAKING_FOOTER.search(body) is not None
 
     if match is None:
         return Commit(sha, OTHER, subject, breaking)
