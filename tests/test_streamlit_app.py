@@ -137,11 +137,23 @@ class TestLoadPipeline:
         pipeline = load_pipeline()
         assert pipeline is not None
 
-    def test_called_with_repo_id(self) -> None:
+    def test_loads_from_the_local_snapshot(self) -> None:
+        # A repo-id string makes mlx-audio ask huggingface.co for the latest
+        # revision on the first Play of every launch; the snapshot's Path does not.
+        from huggingface_hub import snapshot_download
         from mlx_audio.tts.utils import load_model
 
+        snapshot_download.reset_mock()  # ty: ignore[unresolved-attribute]
         load_pipeline()
-        load_model.assert_called_with(REPO_ID)  # ty: ignore[unresolved-attribute]
+        load_model.assert_called_with(  # ty: ignore[unresolved-attribute]
+            Path(ensure_repo_downloaded()), model_type="kokoro"
+        )
+        # The mocked snapshot_download returns the same path whatever it is
+        # asked, so the call above cannot tell the offline lookup from an online
+        # one. Resolving the path with a bare snapshot_download would put the
+        # revision check straight back on the first Play.
+        for c in snapshot_download.call_args_list:  # ty: ignore[unresolved-attribute]
+            assert c.kwargs.get("local_files_only") is True, c
 
     def test_pins_voice_repo_to_our_snapshot(self) -> None:
         # Without this, mlx-audio falls back to its hard-coded

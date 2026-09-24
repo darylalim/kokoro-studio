@@ -177,10 +177,18 @@ def get_voices(lang_code: str) -> list[str]:
 
 
 # The default spinner would read "Running `load_pipeline()`." at the one moment
-# the app makes the user wait without explanation — the first Play of a session.
+# the app makes the user wait without explanation — the first Play of a launch.
 @st.cache_resource(show_spinner="Loading the Kokoro model (first play only)...")
 def load_pipeline() -> Any:
-    model = load_model(REPO_ID)  # ty: ignore[invalid-argument-type]
+    # The snapshot's Path, not REPO_ID. Handed a repo-id string, mlx-audio's
+    # get_model_path runs an online snapshot_download, which asks huggingface.co
+    # for the latest revision on the first Play of every launch; a Path skips it.
+    # model_type is pinned because mlx-audio otherwise infers it from the path:
+    # the directory after the first `hub` component, else the commit-hash
+    # directory name. That yields kokoro only while the cache directory, as
+    # snapshot_download resolves it, is itself named `hub`, which a custom
+    # HF_HUB_CACHE or a `hub` symlink (resolved to its target) need not be.
+    model = load_model(Path(ensure_repo_downloaded()), model_type="kokoro")
     # mlx-audio's Kokoro Model hard-codes `prince-canuma/Kokoro-82M` as the repo
     # it pulls voice tensors from, because its loader builds `Model(config)`
     # without forwarding a repo_id. Left alone, every Play re-downloads a voice

@@ -118,7 +118,7 @@ The **Tokenize** button and the length caption run a *separate* `misaki` / `espe
 
 **Other notable pieces:**
 
-- **Offline-first** — `snapshot_download` fetches the model and all voices once; afterward, voice discovery is just a local filesystem walk. `load_pipeline` also pins the loaded model's `repo_id` to the same snapshot: mlx-audio otherwise falls back to a hard-coded `prince-canuma/Kokoro-82M` for voice tensors, which would re-download each voice on its first Play and fail outright when offline.
+- **Offline-first** — `snapshot_download` fetches the model and all voices once; afterward, voice discovery is just a local filesystem walk. `load_pipeline` loads the model from that snapshot's path rather than its repo id — handed a repo id, mlx-audio asks huggingface.co for the latest revision on every launch's first Play — and also pins the loaded model's `repo_id` to the same snapshot: mlx-audio otherwise falls back to a hard-coded `prince-canuma/Kokoro-82M` for voice tensors, which would re-download each voice on its first Play and fail outright when offline.
 - **Fragment-scoped reruns** — each voice card is an `st.fragment`, so a Play or speed change reruns only that card. Generated audio is cached in session state (bounded, oldest-evicted) so unrelated interactions don't regenerate it.
 
 For a full file-by-file map, a function reference, and design notes, see [CLAUDE.md](CLAUDE.md).
