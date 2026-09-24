@@ -349,6 +349,10 @@ def _render_sample_buttons(lang_code: str) -> None:
                 icon=entry.icon,
                 key=f"sample_{lang_code}_{Path(entry.filename).stem}",
                 width="stretch",
+                # 1.63 stopped wrapping a widget placed directly in a column:
+                # at a 900 px window "Pride & Prejudice" rendered "Pride & …".
+                # Wrapping restores the 1.61 row, at the cost of ragged heights.
+                wrap=True,
                 on_click=_set_text_from_sample,
                 args=(lang_code, entry.filename, entry.is_random),
             )

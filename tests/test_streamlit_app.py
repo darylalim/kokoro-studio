@@ -1820,6 +1820,14 @@ class TestRenderSampleButtons:
         expected = [("a", b.filename, b.is_random) for b in SAMPLE_BUTTONS["a"]]
         assert seen_args == expected
 
+    def test_button_labels_wrap(self) -> None:
+        # Streamlit's default no longer wraps a button placed directly in a
+        # column, so long labels ("Pride & Prejudice") were cut to "Pride & …".
+        self._reset_mocks()
+        _render_sample_buttons("b")
+        wraps = [c.kwargs.get("wrap") for c in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
+        assert wraps == [True] * len(SAMPLE_BUTTONS["b"])
+
     def test_button_icon_is_passed_separately_from_the_label(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("a")
