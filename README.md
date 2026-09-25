@@ -12,7 +12,7 @@
 Streamlit application for generating multilingual speech using [Hexgrad Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) on Apple Silicon with MLX.
 
 <p align="center">
-  <img src="assets/screenshot-dark.png" width="100%" alt="Kokoro Studio in dark theme — a sidebar holding the Language and Voice gender filters above a bordered Pronunciation tips box; in the main area, a Gatsby excerpt in the text area over a row of three sample buttons, the Tokenize button beside a green “275 phonemes — ideal” caption, and the phoneme tokens expanded below as a single unwrapped line running off the block's right edge, beside a grade-sorted column of one-row voice cards, each a name with a speed selector and Play button, whose top card has finished generating and shows an audio player with a Download button beside it">
+  <img src="assets/screenshot-dark.png" width="100%" alt="Kokoro Studio in dark theme — a sidebar holding the Language and Voice gender filters above a bordered Pronunciation tips box; in the main area, a Gatsby excerpt in the text area over a row of three sample buttons, the Tokenize button beside a green “275 phonemes — ideal” caption, and the phoneme tokens expanded below as a single unwrapped line running off the block's right edge, beside a grade-sorted column of six one-row voice cards, each a name with a speed selector and Play button, whose top card has finished generating and shows a Cached badge and an audio player with a Download button beside it, above a switched-off “Show all voices (14 more)” toggle">
 </p>
 
 ## Why Kokoro Studio
@@ -40,9 +40,9 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 **Languages & voices**
 
 - Nine languages: American & British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, and Mandarin Chinese.
-- Voice cards sorted by quality grade (best first). The grade is shown in the title where the model card provides one (e.g. "Heart (female) — A"); ungraded voices (Spanish and Brazilian Portuguese) show just "Name (gender)" and sort after the graded ones. The top 6 are visible, the rest sit behind a "Show all voices (N more)" expander.
+- Voice cards sorted by quality grade (best first). The grade is shown in the title where the model card provides one (e.g. "Heart (female) — A"); ungraded voices (Spanish and Brazilian Portuguese) show just "Name (gender)" and sort after the graded ones. The top 6 are visible; a "Show all voices (N more)" toggle below them reveals the rest.
 - Language picker and gender filter (a single All / Female / Male segmented control, defaulting to All) in the sidebar, leaving the main area to the text and the voices.
-- Compact voice cards — name, speed and Play on one line when the card is wide enough; narrower, speed and Play drop under the name together. Cards inside **Show all voices** are slightly narrower, so they switch first, and just above the switch a name can wrap its grade onto a second line.
+- Compact voice cards — name, speed and Play on one line when the card is wide enough; narrower, speed and Play drop under the name together. Every card is the same width, so they all switch together, and just above the switch a title can wrap its gender and grade onto a second line.
 
 **Generation & playback**
 
@@ -98,7 +98,7 @@ uv run python -m unidic download
 2. Type or paste text into the box — or click a sample button (a random quote plus two literary excerpts) to seed it.
 3. *(Optional)* Click **Tokenize** to preview the phoneme tokens. The colored caption beside it tells you whether the text is too short, ideal length, or long enough to be chunked.
 4. *(Optional)* Filter the voices by gender with **Voice gender** in the sidebar (All / Female / Male).
-5. Pick a voice card — the top 6 by quality grade are shown directly, with the rest behind **Show all voices (N more)**, where N counts what the current gender filter leaves in the tail.
+5. Pick a voice card — the top 6 by quality grade are shown directly, and the **Show all voices (N more)** toggle below them reveals the rest, where N counts what the current gender filter leaves in the tail.
 6. Choose a playback speed (0.7x–1.5x).
 7. Click **Play**. Generation progress appears inline, and gives way to the audio player in the card when it's done.
 8. Play other cards to A/B-compare voices on the same text (a **Cached** badge marks cards that already have audio), and use **Download** to save any clip as a WAV.

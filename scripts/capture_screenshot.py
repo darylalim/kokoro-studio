@@ -86,7 +86,9 @@ SCALE = 2
 # that start it, so a line of text no longer marks where a region ends.
 CROP_ANCHORS = (
     ("Phoneme tokens", "stExpander"),  # composer: the expanded phoneme block
-    ("Show all voices", "stExpander"),  # voice list: the collapsed tail
+    # Voice list: the "Show all voices" toggle under the top cards. st.toggle
+    # has no testid of its own; it renders as a role="switch" stCheckbox.
+    ("Show all voices", "stCheckbox"),
     ("Pronunciation tips", "stVerticalBlock"),  # sidebar: the tips' bordered box
 )
 CROP_MARGIN = 48
@@ -97,7 +99,8 @@ CONTENT_ROOTS = (".stMainBlockContainer", '[data-testid="stSidebarUserContent"]'
 
 GENERATION_TIMEOUT_MS = 240_000
 
-# Cards drawn outside the expander — `_split_voices_for_display`'s `top_n`.
+# Cards drawn above the "Show all voices" toggle — `_split_voices_for_display`'s
+# `top_n`. A fresh session starts with the toggle off, so these are all of them.
 EXPECTED_VISIBLE_CARDS = 6
 
 # Leaf elements, painted boxes and text nodes, for the reasons `content_bottom`

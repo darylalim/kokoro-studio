@@ -504,9 +504,8 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
         # 300 px, and [1.6, 1, 1] left speed and Play 66 px each, which
         # truncated them to "1.(" and "P…"; the same ratios at 1920 px blew the
         # two controls up to 190 px apiece. Here the controls keep a fixed width
-        # and the name takes the rest, so their right edges line up across cards
-        # of one width (tail cards, inset by the expander's padding, sit ~17 px
-        # further in). And a horizontal container wraps by its *own* width,
+        # and the name takes the rest, so their right edges line up card to card
+        # down the list. And a horizontal container wraps by its *own* width,
         # where columns only stack by viewport (<=640 px): when a card is too
         # narrow for one line, the controls drop under the name as a unit — see
         # the inner container — rather than squeezing until their labels clip.
@@ -537,17 +536,17 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                     label_visibility="collapsed",
                     format_func=lambda x: f"{x}x",
                     width=CARD_CONTROL_WIDTH,
-                    # Cards inside the collapsed "Show all voices" expander are
-                    # not drawn, and Streamlit discards the state of any widget a
-                    # run did not draw. Without this a tail voice's speed snapped
-                    # back to 1.0x on reopen — and because _cache_key includes the
-                    # speed, that also demoted its generated clip to a "speed
-                    # changed" stale preview. "session", not "page": Streamlit
-                    # documents "page" as covering a hidden widget too, and in a
-                    # browser it holds here as well, but AppTest builds a fresh
-                    # PagesManager per run, so every run reads as a page switch
-                    # and "page" drops the value. Only "session" is visible to the
-                    # guard test; in a single-page app they're the same.
+                    # Tail cards are not drawn while "Show all voices" is off, and
+                    # Streamlit discards the state of any widget a run did not draw.
+                    # Without this a tail voice's speed snapped back to 1.0x when the
+                    # tail was shown again — and because _cache_key includes the
+                    # speed, that also demoted its generated clip to a "speed changed"
+                    # stale preview. "session", not "page": Streamlit documents "page"
+                    # as covering a hidden widget too, and in a browser it holds here
+                    # as well, but AppTest builds a fresh PagesManager per run, so
+                    # every run reads as a page switch and "page" drops the value.
+                    # Only "session" is visible to the guard test; in a single-page
+                    # app they're the same.
                     persist_state="session",
                 )
                 play_clicked = st.button(
@@ -789,7 +788,7 @@ with voices_col:
     # list — so voices dropped by a filter or language change don't linger. Each
     # card's fragment re-populates its own entry with the key it is displaying (see
     # render_voice_card). Only the cards this run actually draws register, so while
-    # the expander is collapsed the map holds the visible ones alone; that is what
+    # "Show all voices" is off the map holds the visible ones alone; that is what
     # leaves _evict_old_audio enough unprotected keys to hold the cache limit.
     st.session_state["_displayed_card_keys"] = {}
     if voices:
@@ -800,59 +799,33 @@ with voices_col:
         with st.container(gap="xsmall"):
             for voice in visible:
                 render_voice_card(voice, text_input, lang_code)
-        if hidden:
-            # `on_change="rerun"` is what makes `.open` meaningful. Left at the
-            # default, an expander computes its whole body even while collapsed —
-            # for American English that is 14 extra voice cards, each with a
-            # session_state scan and two widgets (three once it has a Download),
-            # rebuilt on every rerun.
-            # Opening now costs one rerun; every other rerun stops paying for it.
-            # `on_change` makes the expander a widget, so its open state is subject
-            # to the same collection as any other: a language or filter leaving
-            # six voices or fewer skips this branch entirely, Streamlit drops
-            # `show_all_voices`, and coming back finds the expander shut. That is
-            # the bug `persist_state` fixes for the speed selectbox, but
-            # st.expander has no such option, so the state is mirrored by hand
-            # into a plain key and fed back through `expanded`. The key's value
-            # is copied into the mirror first whenever it survives, so the
-            # mirror only decides on the runs that actually lost it.
-            # The label carries the tail size because "Show all voices" says a
-            # tail exists but not that it is 14 of 20. Note this makes the label
-            # track the gender filter, and st.expander hashes `label` into its
-            # element id (layouts.py computes it with key_as_main_identity=False
-            # and both `label` and `expanded` as inputs), so the widget identity
-            # now churns on filter changes too. `expanded` is in the same hash,
-            # and a new id starts from `expanded`, not from the click the browser
-            # sent under the old one. So `expanded` is re-seeded only on the runs
-            # that start the widget afresh anyway (the label moved, which moves
-            # the id, or its state was collected) and held still otherwise. Fed
-            # last run's open state, the id moved on every second click and that
-            # click was lost (1.61.1 and 1.64.0); fed this run's, it moved on
-            # every click, so every toggle remounted the expander: keyboard focus
-            # fell to the page, and a second click sent within ~50 ms, before the
-            # browser had the new id, was lost.
-            label = f"Show all voices ({len(hidden)} more)"
-            st.session_state["_show_all_voices_pref"] = st.session_state.get(
-                "show_all_voices", st.session_state.get("_show_all_voices_pref", False)
-            )
-            if (
-                "show_all_voices" not in st.session_state
-                or st.session_state.get("_show_all_voices_label") != label
-            ):
-                st.session_state["_show_all_voices_seed"] = st.session_state[
-                    "_show_all_voices_pref"
-                ]
-                st.session_state["_show_all_voices_label"] = label
-            more_voices = st.expander(
-                label,
-                icon=":material/library_music:",
-                on_change="rerun",
-                key="show_all_voices",
-                expanded=st.session_state["_show_all_voices_seed"],
-            )
-            st.session_state["_show_all_voices_pref"] = bool(more_voices.open)
-            if more_voices.open:
-                with more_voices, st.container(gap="xsmall"):
+            if hidden:
+                # A toggle in the list, not an expander around the tail. The
+                # expander's border and padding made every tail card 34 px
+                # narrower than the six above, so from ~1230 to ~1295 px the two
+                # groups sat on either side of the one-line switchover, and its
+                # Play rail ran 17 px inside theirs at every width. Drawn into
+                # this same container, the tail matches the top six exactly.
+                #
+                # It also drops the machinery the expander needed. st.expander
+                # hashes `label` and `expanded` into its element id, so a label
+                # carrying the count moved the id on every filter change and a
+                # hand-rolled seed/pref mirror had to keep clicks from being
+                # lost. A keyed toggle takes its id from the key alone
+                # (checkbox.py: key_as_main_identity=True), so the count can
+                # change freely; and persist_state="session" keeps it on across a
+                # language or gender filter leaving six voices or fewer, which
+                # never draws it (Japanese has five; British English Female, four).
+                #
+                # Still lazy: the tail's cards — 14 for American English, each a
+                # session_state scan and two widgets — are built only while it
+                # is on, and every other rerun skips them.
+                show_all = st.toggle(
+                    f"Show all voices ({len(hidden)} more)",
+                    key="show_all_voices",
+                    persist_state="session",
+                )
+                if show_all:
                     for voice in hidden:
                         render_voice_card(voice, text_input, lang_code)
     else:

@@ -1,9 +1,11 @@
+import re
 from pathlib import Path
 
+from huggingface_hub import snapshot_download
 from streamlit.proto.Block_pb2 import Block as BlockProto
 from streamlit.proto.LabelVisibility_pb2 import LabelVisibility
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Block, Button, Markdown
+from streamlit.testing.v1.element_tree import Block, Button, Markdown, Toggle
 
 # The initial run touches the local model snapshot and lazily loads a misaki
 # tokenizer when Tokenize is clicked, so allow generous headroom.
@@ -27,21 +29,64 @@ def _voice_titles(at: AppTest) -> list[str]:
     ]
 
 
-def _set_expander(at: AppTest, is_open: bool) -> None:
-    """Open or close "Show all voices" the way a real click would.
+SHOW_ALL_VOICES = "Show all voices"
 
-    A click sends only the widget value, never the app's `_show_all_voices_pref`
-    mirror, so only the widget key is set here. Writing the mirror as well is
-    what hid a lag in it that swallowed every second click in a real browser:
-    left to the app, `test_tail_voice_speed_survives_collapse_and_reopen` fails
-    against the lagging version.
+
+def _show_all_toggle(at: AppTest) -> Toggle:
+    """The "Show all voices" toggle, found by its label as a user finds it.
+
+    Page-wide, like Tokenize in TestSidebar: a misplaced toggle still gets
+    clicked, and the placement asserts are what fail. By label rather than by
+    key, so a regression that drops the key fails the element-id test on the
+    id itself instead of on this lookup.
     """
-    at.session_state["show_all_voices"] = is_open
+    (toggle,) = [t for t in at.toggle if t.label.startswith(SHOW_ALL_VOICES)]
+    return toggle
 
 
-def _speed_keys(at: AppTest) -> set[str]:
-    """Keys of the per-card speed selectboxes this run actually drew."""
-    return {s.key for s in at.selectbox if s.key and s.key.startswith("speed_")}
+def _show_all_voices(at: AppTest, on: bool) -> None:
+    """Flip "Show all voices" the way a click does, then rerun.
+
+    `set_value` sends the new value under the element id the last run drew the
+    toggle with, as a browser does, and writes nothing into session_state
+    behind the widget's back. So if the id moves between runs, the click is
+    lost here exactly as it would be in a browser.
+    """
+    _show_all_toggle(at).set_value(on).run()
+
+
+def _tail_size(at: AppTest) -> int:
+    """How many more voices the toggle's label promises: 14 in "(14 more)"."""
+    label = _show_all_toggle(at).label
+    match = re.fullmatch(rf"{SHOW_ALL_VOICES} \((\d+) more\)", label)
+    assert match, f"unexpected toggle label {label!r}"
+    return int(match[1])
+
+
+def _voices_on_disk(prefix: str) -> int:
+    """Voice files in the local snapshot whose id starts with `prefix`.
+
+    A count the app cannot influence: the toggle's label and its tail both come
+    from the app's own `hidden` list, so checking one against the other passes
+    even when that list silently drops voices.
+    """
+    snapshot = Path(
+        snapshot_download("mlx-community/Kokoro-82M-bf16", local_files_only=True)
+    )
+    return len(list((snapshot / "voices").glob(f"{prefix}*.safetensors")))
+
+
+def _block_shape(node: object) -> object:
+    """A card's nesting of blocks and element types, blind to its content."""
+    if not isinstance(node, Block):
+        return type(node).__name__
+    children = tuple(_block_shape(node.children[i]) for i in sorted(node.children))
+    return (node.proto.SerializeToString(deterministic=True), children)
+
+
+def _speed_keys(root: AppTest | Block) -> set[str]:
+    """Keys of the per-card speed selectboxes this run actually drew in `root`."""
+    return {s.key for s in root.selectbox if s.key and s.key.startswith("speed_")}
 
 
 TIPS_SYNTAX = "[word](/phonemes/)"
@@ -160,9 +205,11 @@ class TestSidebar:
         assert labels.count("Play") == 6
         samples = [b for b in at.main.button if (b.key or "").startswith("sample_")]
         assert len(samples) == 3
-        # The tail cards too: the expander sits in main's voice column.
-        _set_expander(at, True)
-        at.run()
+        # The tail cards too, and the toggle that reveals them: both belong to
+        # main's voice column.
+        assert [t.label for t in at.main.toggle] == [_show_all_toggle(at).label]
+        assert not at.sidebar.toggle
+        _show_all_voices(at, True)
         assert not _composer_and_card_buttons(at.sidebar)
         plays = [b for b in at.button if b.label == "Play"]
         assert len(plays) > 6
@@ -283,8 +330,7 @@ class TestVoiceCards:
     def test_each_visible_voice_has_speed_selectbox_default_1x(self) -> None:
         at = _run_app()
         # Top-grade American English voices, all inside the visible top 6.
-        # (am_adam used to pass here only because the expander rendered its whole
-        # body while collapsed; it is a tail voice and is no longer drawn.)
+        # (am_adam is a tail voice, drawn only once "Show all voices" is on.)
         for voice in ("af_heart", "af_bella", "af_nicole"):
             assert at.selectbox(key=f"speed_{voice}").value == 1.0
 
@@ -307,104 +353,26 @@ class TestVoiceCards:
         assert not at.exception
         assert at.selectbox(key="speed_af_heart").value == 1.5
 
-    def test_collapsed_expander_does_not_build_the_tail_voice_cards(self) -> None:
-        # "Show all voices" is lazy (on_change="rerun" + .open). Left at the
-        # default an expander computes its body while collapsed, which for
-        # American English's 20 voices meant 14 surplus cards — each a
-        # session_state scan and three widgets — on every rerun.
-        at = _run_app()
-        # Setting on_change makes the expander a widget, so its open state lands
-        # in session_state. (It is missing from at.expander only because of its
-        # icon: AppTest files any expander with an icon under at.status.) Reading
-        # it here is what pins the lazy behaviour: no key means no `.open` gating.
-        assert at.session_state["show_all_voices"] is False
-        assert len(_voice_titles(at)) == 6
-        assert len([b for b in at.button if b.label == "Play"]) == 6
-
-    def test_opening_the_expander_reveals_the_remaining_voices(self) -> None:
-        at = _run_app()
-        _set_expander(at, True)
-        at.run()
-        assert not at.exception
-        assert len(_voice_titles(at)) > 6
-
-    def test_every_click_toggles_the_expander(self) -> None:
-        # The expander's element id hashes `expanded`. Fed a mirror one run
-        # behind, the id changed on every second click and that click was lost.
-        at = _run_app()
-        for is_open in (True, False, True, False):
-            _set_expander(at, is_open)
-            at.run()
-            plays = len([b for b in at.button if b.label == "Play"])
-            assert (plays > 6) is is_open
-
-    def test_a_click_keeps_the_expanders_element_id(self) -> None:
-        # A new element id remounts the expander in the browser: keyboard focus
-        # fell to the page after every Enter, and a click sent under the old id
-        # before the new one arrived (a double click within ~50 ms) was dropped.
-        # Only a label change or a restore may re-seed it.
-        at = _run_app()
-        ids = [s.proto.id for s in at.status if "Show all voices" in s.label]
-        for is_open in (True, False, True):
-            _set_expander(at, is_open)
-            at.run()
-            ids += [s.proto.id for s in at.status if "Show all voices" in s.label]
-        assert len(ids) == 4
-        assert len(set(ids)) == 1
-
-    def test_a_filter_change_reseeds_the_expander(self) -> None:
-        # The label carries the tail size, so a filter change moves the element
-        # id, and a new id starts from `expanded`: without the re-seed the
-        # expander shut on every filter change. A browser resends the expander's
-        # value with every rerun, so restate it here; left out, AppTest drops the
-        # key and the collected-state re-seed hides a missing label re-seed.
-        at = _run_app()
-        _set_expander(at, True)
-        at.run()
-        _set_expander(at, True)
-        at.segmented_control(key="gender").set_value("Male").run()
-        assert len([b for b in at.button if b.label == "Play"]) == 9
-
-    def test_expander_stays_open_across_a_language_with_no_hidden_voices(self) -> None:
-        # on_change turned the expander's open state into ordinary widget state,
-        # which Streamlit collects on any run that does not draw it. Japanese has
-        # five voices, so `hidden` is empty, the expander is never created, and
-        # `show_all_voices` disappears — English then came back collapsed. The
-        # plain `_show_all_voices_pref` mirror is what survives that round trip.
-        at = _run_app()
-        _set_expander(at, True)
-        at.run()
-        opened = len([b for b in at.button if b.label == "Play"])
-        assert opened > 6
-
-        at.selectbox(key="language").select("Japanese").run()
-        assert "show_all_voices" not in at.session_state
-
-        at.selectbox(key="language").select("American English").run()
-        assert len([b for b in at.button if b.label == "Play"]) == opened
-
     def test_tail_voice_speed_survives_collapse_and_reopen(self) -> None:
         # Streamlit discards the state of any widget a run did not draw, so
-        # collapsing the expander drops `speed_{voice}` for every tail card.
-        # Without persist_state="session" the choice snapped back to 1.0x on
-        # reopen — and because _cache_key includes the speed, that also demoted
-        # the voice's generated clip to a "speed changed" stale preview.
+        # turning "Show all voices" off drops `speed_{voice}` for every tail
+        # card. Without persist_state="session" the choice snapped back to 1.0x
+        # when the tail came back — and because _cache_key includes the speed,
+        # that also demoted the voice's generated clip to a "speed changed"
+        # stale preview.
         at = _run_app()
         visible = _speed_keys(at)
-        _set_expander(at, True)
-        at.run()
+        _show_all_voices(at, True)
         tail = sorted(_speed_keys(at) - visible)
-        assert tail, "expected voices behind the expander"
+        assert tail, "expected voices behind the toggle"
         voice_key = tail[0]
 
-        _set_expander(at, True)
         at.selectbox(key=voice_key).select(1.3).run()
         assert at.selectbox(key=voice_key).value == 1.3
 
-        _set_expander(at, False)
-        at.run()
-        _set_expander(at, True)
-        at.run()
+        _show_all_voices(at, False)
+        assert voice_key not in _speed_keys(at)
+        _show_all_voices(at, True)
         assert at.selectbox(key=voice_key).value == 1.3
 
     def test_play_buttons_enabled_after_typing(self) -> None:
@@ -413,3 +381,146 @@ class TestVoiceCards:
         play_buttons = [b for b in at.button if b.label == "Play"]
         assert len(play_buttons) >= 3  # one per visible American English voice
         assert not any(b.disabled for b in play_buttons)
+
+
+class TestShowAllVoices:
+    """The voices past the top six sit behind a toggle drawn into the list.
+
+    It is a keyed st.toggle between the top six and the rest, inside the same
+    container, so every card is laid out alike. Keyed, its element id comes from
+    the key alone, so the tail size in its label can change without remounting
+    it; persisted, it stays on through a language or gender filter that leaves
+    too few voices to draw it. It is found by label and flipped with
+    `set_value`, as a user would.
+    """
+
+    def test_off_by_default_and_the_tail_is_not_built(self) -> None:
+        # Lazy: the tail's cards — 14 for American English, each a session_state
+        # scan and two widgets — are built only while the toggle is on, rather
+        # than on every rerun of the page.
+        at = _run_app()
+        assert _show_all_toggle(at).value is False
+        assert _tail_size(at) > 0
+        assert len(_speed_keys(at)) == 6
+        assert len(_voice_titles(at)) == 6
+        assert len([b for b in at.button if b.label == "Play"]) == 6
+
+    def test_turning_it_on_reveals_every_remaining_voice(self) -> None:
+        # As many new cards as the label promised, the top six still there, and
+        # every American English voice on disk accounted for.
+        at = _run_app()
+        top = _speed_keys(at)
+        promised = _tail_size(at)
+        _show_all_voices(at, True)
+        assert not at.exception
+        shown = _speed_keys(at)
+        assert top < shown
+        assert len(shown - top) == promised
+        assert len(shown) == _voices_on_disk("a")
+        assert len(_voice_titles(at)) == len(shown)
+
+    def test_every_click_flips_it(self) -> None:
+        # Several clicks in a row, each sent under the id the previous run drew.
+        # A toggle whose id moved from run to run would start the next run from
+        # its default instead, and swallow the click.
+        at = _run_app()
+        for on in (True, False, True, False, True):
+            _show_all_voices(at, on)
+            assert _show_all_toggle(at).value is on
+            assert (len(_speed_keys(at)) > 6) is on
+
+    def test_its_element_id_survives_clicks_and_a_count_change(self) -> None:
+        # A new element id remounts the widget in the browser: keyboard focus
+        # falls to the page, and a click sent under the old id before the new
+        # one arrives is lost. The label carries the tail size, which the gender
+        # filter changes, so the id must not hash the label. A keyed toggle's id
+        # comes from its key alone; unkeyed, or keyed by its label, the id would
+        # follow the count.
+        at = _run_app()
+        seen = [_show_all_toggle(at)]
+        for on in (True, False, True):
+            _show_all_voices(at, on)
+            seen.append(_show_all_toggle(at))
+        at.segmented_control(key="gender").set_value("Male").run()
+        seen.append(_show_all_toggle(at))
+        assert len({t.label for t in seen}) == 2, "the filter should move the count"
+        assert len({t.id for t in seen}) == 1
+
+    def test_stays_on_across_a_filter_change(self) -> None:
+        at = _run_app()
+        _show_all_voices(at, True)
+        before = _show_all_toggle(at).label
+        at.segmented_control(key="gender").set_value("Male").run()
+        toggle = _show_all_toggle(at)
+        assert toggle.label != before
+        assert toggle.value is True
+        titles = _voice_titles(at)
+        assert all("(male)" in t for t in titles)
+        assert len(titles) == 6 + _tail_size(at) == _voices_on_disk("am")
+
+    def test_stays_on_across_a_filter_that_never_draws_it(self) -> None:
+        # A gender filter hides the toggle the same way a small language does:
+        # British English has eight voices, so its toggle offers two more, but
+        # Female leaves four, and a run that does not draw the toggle would
+        # discard its state without persist_state="session".
+        at = _run_app()
+        at.sidebar.selectbox(key="language").select("British English").run()
+        _show_all_voices(at, True)
+        opened = _speed_keys(at)
+        assert len(opened) == _voices_on_disk("b") > 6
+
+        at.sidebar.segmented_control(key="gender").set_value("Female").run()
+        assert not at.toggle
+
+        at.sidebar.segmented_control(key="gender").set_value("All").run()
+        assert _show_all_toggle(at).value is True
+        assert _speed_keys(at) == opened
+
+    def test_stays_on_across_a_language_that_never_draws_it(self) -> None:
+        # Japanese has five voices: no tail, so no toggle, and Streamlit discards
+        # the state of any widget a run does not draw. Without
+        # persist_state="session", American English came back with its tail
+        # hidden.
+        at = _run_app()
+        _show_all_voices(at, True)
+        opened = _speed_keys(at)
+
+        at.sidebar.selectbox(key="language").select("Japanese").run()
+        assert not at.toggle
+        assert 0 < len(_speed_keys(at)) <= 6
+
+        at.sidebar.selectbox(key="language").select("American English").run()
+        assert _show_all_toggle(at).value is True
+        assert _speed_keys(at) == opened
+
+    def test_tail_cards_share_one_container_with_the_top_six(self) -> None:
+        # The structural reason every card measures the same width: the tail is
+        # drawn straight into the container that holds the top six, with the
+        # toggle between them. Anything wrapped around the tail gives it a block
+        # of its own — an expander's border and padding made each tail card
+        # 34 px narrower than the six above it.
+        at = _run_app()
+        _show_all_voices(at, True)
+        (voice_list,) = [
+            node
+            for node in at.main
+            if isinstance(node, Block)
+            and any(
+                isinstance(c, Toggle) and c.label.startswith(SHOW_ALL_VOICES)
+                for c in node.children.values()
+            )
+        ]
+        rows = [voice_list.children[i] for i in sorted(voice_list.children)]
+        # One row per card, each holding exactly one speed selectbox; a wrapper
+        # around the tail would be a single row holding all of them.
+        shape = [
+            len(_speed_keys(row)) if isinstance(row, Block) else type(row).__name__
+            for row in rows
+        ]
+        assert shape == [1] * 6 + ["Toggle"] + [1] * _tail_size(at)
+        assert _speed_keys(voice_list) == _speed_keys(at)
+        # And each card is built alike, top six and tail: a bordered wrapper
+        # around every tail card would keep the one-selectbox-per-row shape above
+        # while bringing back the narrower, inset tail.
+        cards = [row for row in rows if isinstance(row, Block)]
+        assert len({_block_shape(card) for card in cards}) == 1

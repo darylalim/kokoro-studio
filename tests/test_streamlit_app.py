@@ -1207,13 +1207,13 @@ class TestRenderVoiceCard:
     def test_speed_selectbox_persists_while_unrendered(self) -> None:
         """The speed must outlive a card that a run did not draw.
 
-        Cards inside the collapsed "Show all voices" expander are not drawn, and
-        Streamlit discards the state of any widget a run skipped. Losing it sends
-        the card back to 1.0x on reopen and — since `_cache_key` includes the
-        speed — demotes its clip to a stale preview. "page" holds it too in a
-        browser, but AppTest builds a fresh PagesManager per run, so every run
-        reads as a page switch and resets it. So only "session" passes
-        `tests_integration`, which exercises the real collapse/reopen cycle.
+        Tail cards are not drawn while "Show all voices" is off, and Streamlit
+        discards the state of any widget a run skipped. Losing it sends the card
+        back to 1.0x when the tail is shown again and — since `_cache_key`
+        includes the speed — demotes its clip to a stale preview. "page" holds it
+        too in a browser, but AppTest builds a fresh PagesManager per run, so
+        every run reads as a page switch and resets it. So only "session" passes
+        `tests_integration`, which turns the real toggle off and back on.
         """
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
@@ -1818,6 +1818,76 @@ class TestFirstLaunchDownloadGuard:
         # would offer choices the stopped app can never act on.
         page.caption.assert_not_called()
         assert page.sidebar.mock_calls == []
+
+
+class TestShowAllVoicesToggle:
+    """The toggle's contract, in the suite CI runs.
+
+    tests_integration drives the real widget but needs the real model snapshot,
+    so CI never runs it. This re-executes the module body, as
+    TestFirstLaunchDownloadGuard does, against a snapshot of eight American
+    English voices: six on show, two behind the toggle.
+    """
+
+    TOP_SIX = ("af_heart", "af_bella", "af_nicole", "af_aoede", "af_kore", "af_sarah")
+    TAIL = ("am_fenrir", "am_michael")
+
+    def _run_app(self, tmp_path: Path, *, toggled_on: bool) -> MagicMock:
+        import streamlit_app
+
+        voices = tmp_path / "voices"
+        voices.mkdir()
+        for voice in self.TOP_SIX + self.TAIL:
+            (voices / f"{voice}.safetensors").touch()
+
+        page = MagicMock(name="streamlit")
+
+        def _passthrough(*args: Any, **_kw: Any) -> Any:
+            return args[0] if args else lambda func: func
+
+        page.cache_resource = page.cache_data = page.fragment = _passthrough
+        page.selectbox.side_effect = lambda label, **_kw: (
+            1.0 if label.startswith("Speed for ") else "American English"
+        )
+        page.segmented_control.return_value = "All"
+        page.text_area.return_value = ""
+        page.button.return_value = False
+        page.columns.side_effect = lambda spec, **_kw: [
+            MagicMock() for _ in range(spec)
+        ]
+        page.toggle.return_value = toggled_on
+        page.session_state = {}
+        hub = MagicMock(name="huggingface_hub")
+        hub.snapshot_download.return_value = str(tmp_path)
+        with patch.dict(sys.modules, {"streamlit": page, "huggingface_hub": hub}):
+            runpy.run_path(streamlit_app.__file__)
+        return page
+
+    @staticmethod
+    def _cards_built(page: MagicMock) -> set[str]:
+        return {
+            c.kwargs["key"].removeprefix("speed_")
+            for c in page.selectbox.call_args_list
+            if c.kwargs.get("key", "").startswith("speed_")
+        }
+
+    def test_is_keyed_persisted_and_counts_the_tail(self, tmp_path: Path) -> None:
+        # Keyed, so its id ignores the count in its label; persisted, so a
+        # language or gender filter too small to draw it cannot discard it.
+        page = self._run_app(tmp_path, toggled_on=False)
+        page.toggle.assert_called_once_with(
+            "Show all voices (2 more)",
+            key="show_all_voices",
+            persist_state="session",
+        )
+
+    @pytest.mark.parametrize("toggled_on", [False, True], ids=["off", "on"])
+    def test_builds_the_tail_only_while_on(
+        self, tmp_path: Path, toggled_on: bool
+    ) -> None:
+        page = self._run_app(tmp_path, toggled_on=toggled_on)
+        expected = set(self.TOP_SIX) | (set(self.TAIL) if toggled_on else set())
+        assert self._cards_built(page) == expected
 
 
 class TestVoiceGrades:
