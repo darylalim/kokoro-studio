@@ -992,7 +992,7 @@ class TestRenderVoiceCard:
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
+        st.markdown.assert_called_once_with("**Heart (female)\u00a0—\u00a0A**")  # ty: ignore[unresolved-attribute]
 
     def test_badge_when_cached_at_current_speed(self) -> None:
         self._reset_mocks()
@@ -1002,7 +1002,7 @@ class TestRenderVoiceCard:
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
-            "**Heart (female) — A** :green-badge[Cached]"
+            "**Heart (female)\u00a0—\u00a0A** :green-badge[Cached]"
         )
 
     def test_badge_when_cached_at_other_speed(self) -> None:
@@ -1013,7 +1013,7 @@ class TestRenderVoiceCard:
         }
         render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
-            "**Heart (female) — A** :green-badge[Cached]"
+            "**Heart (female)\u00a0—\u00a0A** :green-badge[Cached]"
         )
 
     def test_no_badge_when_cache_for_different_text(self) -> None:
@@ -1023,7 +1023,7 @@ class TestRenderVoiceCard:
             "voice": "af_heart",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
+        st.markdown.assert_called_once_with("**Heart (female)\u00a0—\u00a0A**")  # ty: ignore[unresolved-attribute]
 
     def test_no_badge_when_cache_for_different_voice(self) -> None:
         self._reset_mocks()
@@ -1032,7 +1032,7 @@ class TestRenderVoiceCard:
             "voice": "af_bella",
         }
         render_voice_card("af_heart", "hello", "a")
-        st.markdown.assert_called_once_with("**Heart (female) — A**")  # ty: ignore[unresolved-attribute]
+        st.markdown.assert_called_once_with("**Heart (female)\u00a0—\u00a0A**")  # ty: ignore[unresolved-attribute]
 
     def test_play_button_key_is_voice_specific(self) -> None:
         self._reset_mocks()
@@ -1126,7 +1126,7 @@ class TestRenderVoiceCard:
         render_voice_card("af_heart", "hello", "a")
         calls = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
         speed_call = next(c for c in calls if c.kwargs["key"] == "speed_af_heart")
-        assert speed_call.args[0] == "Speed for Heart (female) — A"
+        assert speed_call.args[0] == "Speed for Heart (female)\u00a0—\u00a0A"
         assert speed_call.kwargs["label_visibility"] == "collapsed"
 
     def test_renders_audio_when_cached(self) -> None:
@@ -1347,7 +1347,7 @@ class TestRenderVoiceCard:
         ):
             render_voice_card("af_heart", "hello", "a")
         st.markdown.assert_called_once_with(  # ty: ignore[unresolved-attribute]
-            "**Heart (female) — A** :green-badge[Cached]"
+            "**Heart (female)\u00a0—\u00a0A** :green-badge[Cached]"
         )
         del st.session_state[_cache_key("af_heart", "hello", 1.0, "a")]
 
@@ -1627,11 +1627,11 @@ class TestFormatVoice:
     @pytest.mark.parametrize(
         ("voice", "expected"),
         [
-            ("af_heart", "Heart (female) — A"),
-            ("am_adam", "Adam (male) — F+"),
-            ("bf_alice", "Alice (female) — D"),
-            ("jf_alpha", "Alpha (female) — C+"),
-            ("af_bella", "Bella (female) — A-"),
+            ("af_heart", "Heart (female)\u00a0—\u00a0A"),
+            ("am_adam", "Adam (male)\u00a0—\u00a0F+"),
+            ("bf_alice", "Alice (female)\u00a0—\u00a0D"),
+            ("jf_alpha", "Alpha (female)\u00a0—\u00a0C+"),
+            ("af_bella", "Bella (female)\u00a0—\u00a0A-"),
             # Spanish/Portuguese voices have no published grades
             ("ef_dora", "Dora (female)"),
             ("af_some_long_name", "Some Long Name (female)"),
@@ -1652,6 +1652,14 @@ class TestFormatVoice:
     )
     def test_format_voice(self, voice: str, expected: str) -> None:
         assert _format_voice(voice) == expected
+
+    def test_a_long_title_breaks_before_the_gender_not_the_grade(self) -> None:
+        # The title slot is narrow just above the one-line switchover, and plain
+        # spaces round the dash left the grade alone on a second line. Only the
+        # space between name and "(gender)" may break.
+        title = _format_voice("af_nicole")
+        assert title == "Nicole (female)\u00a0—\u00a0B-"
+        assert title.split(" ") == ["Nicole", "(female)\u00a0—\u00a0B-"]
 
 
 class TestGenderCodeFromSelection:

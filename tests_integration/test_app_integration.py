@@ -295,7 +295,7 @@ class TestVoiceCards:
         labels = {
             s.key: s.label for s in at.selectbox if s.key and s.key.startswith("speed_")
         }
-        assert labels["speed_af_heart"] == "Speed for Heart (female) — A"
+        assert labels["speed_af_heart"] == "Speed for Heart (female)\u00a0—\u00a0A"
         assert len(set(labels.values())) == len(labels) == 6
 
     def test_changing_card_speed_reruns_cleanly(self) -> None:

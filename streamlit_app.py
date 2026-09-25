@@ -270,7 +270,10 @@ def _format_voice(voice: str) -> str:
     gender = _GENDER_LABELS.get(voice[1], "")
     grade = VOICE_GRADES.get(voice, "")
     base = f"{name} ({gender})" if gender else name
-    return f"{base} — {grade}" if grade else base
+    # No-break spaces around the dash, so a title too long for its slot breaks
+    # between the name and "(gender) — grade" rather than stranding the grade:
+    # plain spaces left "Nicole (female) —" over a lone "B-" at ~1230-1300 px.
+    return f"{base}\u00a0—\u00a0{grade}" if grade else base
 
 
 def _filter_voices_by_gender(voices: list[str], gender_code: str | None) -> list[str]:
