@@ -11,8 +11,9 @@ This is a script rather than a paragraph of instructions because all nine ways
 it goes wrong produce a *plausible but wrong image* instead of an error:
 
 * `embed_options=dark_theme` is a no-op, so dark mode is forced by emulating the
-  browser's colour scheme. That is also the honest path: the app ships no theme
-  and follows the system setting, so this is what a dark-mode user really sees.
+  browser's colour scheme. That is also the honest path: the app follows the
+  system setting (only its dark theme is custom), so this is what a dark-mode
+  user really sees.
 * Chrome's own `--headless --screenshot --virtual-time-budget` captures the
   skeleton loader — virtual time advances timers but never Streamlit's websocket
   handshake. Every wait below is therefore on a real selector.

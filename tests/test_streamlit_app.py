@@ -2519,10 +2519,50 @@ class TestNextAudioSeq:
 
 
 class TestStreamlitConfig:
-    """Guard the shipped .streamlit/config.toml — both the disabled file watcher
-    and the deliberately absent [theme] section. This docstring is the one
+    """Guard the shipped .streamlit/config.toml: the disabled file watcher, the
+    telemetry opt-out, and the "Ai-iro" dark theme. This docstring is the one
     authoritative statement of the theming decision; config.toml and CLAUDE.md
-    point here rather than restating it."""
+    point here rather than restating it.
+
+    **Dark mode only.** Streamlit 1.64's frontend builds its Light/Dark/System
+    variants whenever *either* [theme.light] or [theme.dark] is non-empty (not
+    only when both are), and fills every unset key from that mode's stock base.
+    So a lone [theme.dark] keeps the mode menu and leaves light mode on the
+    stock theme with nothing hand-copied: a browser render compared every
+    probed light-mode colour with the no-theme build and found them identical.
+    A root [theme] key would restyle light mode too, and a bare [theme] block
+    pins the app to one mode with no error. No font keys either: Streamlit
+    self-hosts its default fonts, and a Google Fonts URL is an outbound request
+    on every page load, which breaks README's "no network calls".
+
+    **Two accents, one hue.** Primary buttons (Play) always draw a white label
+    on `primaryColor`, and the selected "Voice gender" segment draws its label
+    *in* `primaryColor`. On a near-black page no single colour clears 4.5:1 for
+    both (the ceiling is about 4.2:1). The sidebar has no primary buttons, so
+    [theme.dark.sidebar] carries a lighter periwinkle of the main indigo.
+
+    **The page colours are pinned on purpose.** Every contrast pair below can
+    then be computed from this file alone. Leaving them unset would track
+    Streamlit's stock dark palette, but these tests could then check nothing
+    without hand-copying that palette, which drifts across releases.
+
+    Measured facts the maths relies on (Streamlit 1.64, pixel-sampled):
+    captions draw at opacity 0.6; the sidebar's background is
+    `secondaryBackgroundColor` unless [theme.dark.sidebar] sets its own; the
+    selected segment fills with its primary at 10% alpha; and `borderColor` is
+    also the st.toggle off-state track, so it must meet WCAG 1.4.11's 3:1.
+    `orangeTextColor` and `greenTextColor` stay stock and measured 4.70 / 4.80
+    as captions on this page; stock red measured 3.14, hence `redTextColor`.
+    Nothing here can see the two stock shades, so re-measure them — and
+    re-confirm the either-block rule and an unchanged light mode — after a
+    Streamlit upgrade.
+    """
+
+    # Every 0.6-opacity pair: the orientation caption, the "speed changed"
+    # caption, and _render_length_caption's colour bands.
+    CAPTION_OPACITY: ClassVar[float] = 0.6
+    # The selected segment's fill is its primary colour at this alpha.
+    SEGMENT_TINT: ClassVar[float] = 0.1
 
     @staticmethod
     def _repo_root() -> Path:
@@ -2538,6 +2578,50 @@ class TestStreamlitConfig:
         with path.open("rb") as f:
             return tomllib.load(f)
 
+    def _dark(self) -> dict[str, Any]:
+        return self._load_config()["theme"]["dark"]
+
+    def _sidebar(self) -> dict[str, Any]:
+        """The dark sidebar's effective colours, falling back as Streamlit does."""
+        dark = self._dark()
+        own = dark.get("sidebar", {})
+        return {
+            "backgroundColor": own.get(
+                "backgroundColor", dark["secondaryBackgroundColor"]
+            ),
+            "primaryColor": own.get("primaryColor", dark["primaryColor"]),
+            "borderColor": own.get("borderColor", dark["borderColor"]),
+        }
+
+    @staticmethod
+    def _contrast(fg: str, bg: str, alpha: float = 1.0) -> float:
+        """WCAG 2 contrast ratio of `fg`, drawn at `alpha` over `bg`."""
+
+        def rgb(hex_color: str) -> tuple[int, ...]:
+            h = hex_color.lstrip("#")
+            return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+
+        def luminance(channels: tuple[float, ...]) -> float:
+            lin = [
+                c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+                for c in (v / 255 for v in channels)
+            ]
+            return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+        back = rgb(bg)
+        drawn = tuple(
+            f * alpha + b * (1 - alpha) for f, b in zip(rgb(fg), back, strict=True)
+        )
+        hi, lo = sorted((luminance(drawn), luminance(back)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def _tint(self, color: str, over: str, alpha: float) -> str:
+        """`color` composited at `alpha` over `over`, as a hex string."""
+        c = [int(color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
+        o = [int(over.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
+        mixed = (round(a * alpha + b * (1 - alpha)) for a, b in zip(c, o, strict=True))
+        return "#" + "".join(f"{v:02x}" for v in mixed)
+
     def test_file_watcher_stays_disabled(self) -> None:
         # README's troubleshooting table tells users edits don't auto-reload
         # because of this; it is a server setting, not a theme one.
@@ -2552,24 +2636,68 @@ class TestStreamlitConfig:
         config = self._load_config()
         assert config.get("browser", {}).get("gatherUsageStats") is False
 
-    def test_ships_no_custom_theme(self) -> None:
-        # The app renders in Streamlit's stock light and dark themes, whose
-        # defaults already supply both modes, the toolbar toggle, and the
-        # per-mode red/orange/green that _render_length_caption's bands use.
-        #
-        # This asserts absence deliberately, in the same spirit as
-        # TestReleaseWorkflow.test_tag_triggered_release_workflow_stays_retired:
-        # the decision is that no theme ships, and a *partial* theme is the way
-        # that decision breaks silently — Streamlit keeps the light/dark toggle
-        # only when a custom theme defines both [theme.light] and [theme.dark],
-        # so a bare [theme] block pins the app to one mode with no error. Any
-        # deliberate return to theming updates this test, README's feature list,
-        # and CLAUDE.md's Configuration section together.
-        config = self._load_config()
-        assert "theme" not in config, (
-            "config.toml defines a custom [theme]; the app is meant to render "
-            "in Streamlit's default light and dark themes"
+    def test_only_dark_mode_is_themed(self) -> None:
+        # Any root [theme] key, a [theme.light], or a mode-less [theme.sidebar]
+        # would restyle stock light mode as well.
+        theme = self._load_config().get("theme", {})
+        assert set(theme) == {"dark"}, (
+            f"[theme] may hold only the dark block, found {sorted(theme)}"
         )
+        nested = {k for k, v in theme["dark"].items() if isinstance(v, dict)}
+        assert nested <= {"sidebar"}, f"unexpected sub-tables: {sorted(nested)}"
+
+    def test_theme_loads_nothing_remote(self) -> None:
+        # A font key, or any URL (Google Fonts, a remote `base`), is a network
+        # request on every page load.
+        dark = self._dark()
+        for section in (dark, dark.get("sidebar", {})):
+            for key, value in section.items():
+                assert "font" not in key.lower(), f"font key {key!r} in the theme"
+                assert "://" not in str(value), f"{key} loads {value!r}"
+
+    def test_play_label_reads_on_the_accent(self) -> None:
+        # Streamlit always draws a primary button's label white.
+        assert self._contrast("#ffffff", self._dark()["primaryColor"]) >= 4.5
+
+    def test_accent_and_borders_meet_non_text_contrast(self) -> None:
+        # WCAG 1.4.11: Play's fill and the toggle's on-track are the accent,
+        # and the toggle's off-track is borderColor. The sidebar's segment and
+        # tips-box borders sit on the lighter sidebar, hence their own colour.
+        dark, sidebar = self._dark(), self._sidebar()
+        page = dark["backgroundColor"]
+        assert self._contrast(dark["primaryColor"], page) >= 3.0
+        assert self._contrast(dark["borderColor"], page) >= 3.0
+        assert self._contrast(sidebar["borderColor"], sidebar["backgroundColor"]) >= 3.0
+
+    def test_selected_segment_label_reads_in_the_sidebar(self) -> None:
+        # The selected "Voice gender" segment draws its label in the sidebar
+        # primary, over that same colour at 10% on the sidebar background.
+        sidebar = self._sidebar()
+        fill = self._tint(
+            sidebar["primaryColor"], sidebar["backgroundColor"], self.SEGMENT_TINT
+        )
+        assert self._contrast(sidebar["primaryColor"], fill) >= 4.5
+
+    def test_text_reads_on_every_surface(self) -> None:
+        # Body text gets AAA on the page and AA on the raised surfaces (the
+        # sidebar, the text area). Inline code sits on a background Streamlit
+        # derives between the two, so clearing both bounds it.
+        dark = self._dark()
+        page, raised = dark["backgroundColor"], dark["secondaryBackgroundColor"]
+        assert self._contrast(dark["textColor"], page) >= 7.0
+        assert self._contrast(dark["textColor"], raised) >= 4.5
+        for surface in (page, raised):
+            assert self._contrast(dark["codeTextColor"], surface) >= 4.5
+
+    def test_captions_read_at_their_drawn_opacity(self) -> None:
+        # Captions draw at 0.6 opacity, so their CSS colour overstates the
+        # contrast actually shown. Stock redTextColor drew the "very short" and
+        # "will be chunked" bands at 3.14:1, which is why the key is set.
+        dark = self._dark()
+        page = dark["backgroundColor"]
+        assert "redTextColor" in dark, "stock red draws captions at ~3.1:1"
+        for key in ("textColor", "redTextColor"):
+            assert self._contrast(dark[key], page, self.CAPTION_OPACITY) >= 4.5, key
 
 
 class TestProjectMetadata:

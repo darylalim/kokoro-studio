@@ -7,6 +7,18 @@ fileWatcherType = "none"
 # after the one-time model download; this key is what makes that promise true.
 gatherUsageStats = false
 
-# No [theme] section on purpose — the app renders in Streamlit's stock light and
-# dark themes. TestStreamlitConfig holds the rationale and guards every setting
-# in this file.
+# "Ai-iro" — a dark theme only. No root [theme] keys and no [theme.light], so
+# light mode stays Streamlit's stock theme. TestStreamlitConfig holds the
+# rationale and guards every setting in this file.
+[theme.dark]
+primaryColor = "#4e5fd2"
+backgroundColor = "#0b0e1a"
+secondaryBackgroundColor = "#222638"
+textColor = "#e6e9f4"
+borderColor = "#58617f"
+codeTextColor = "#b4bee6"
+redTextColor = "#ffb4b4"
+
+[theme.dark.sidebar]
+primaryColor = "#afb8f2"
+borderColor = "#687296"
