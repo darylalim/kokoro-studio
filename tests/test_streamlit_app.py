@@ -983,7 +983,7 @@ class TestRenderVoiceCard:
         render_voice_card("af_heart", "hello", "a")
         selectboxes = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
         buttons = st.button.call_args_list  # ty: ignore[unresolved-attribute]
-        speed = next(c for c in selectboxes if c.args and c.args[0] == "Speed")
+        speed = next(c for c in selectboxes if c.kwargs["key"] == "speed_af_heart")
         play = next(c for c in buttons if c.args and c.args[0] == "Play")
         assert isinstance(CARD_CONTROL_WIDTH, int)  # pixels, not "stretch"
         assert speed.kwargs["width"] == CARD_CONTROL_WIDTH
@@ -1103,9 +1103,9 @@ class TestRenderVoiceCard:
     def test_renders_speed_selectbox(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
+        calls = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
         speed_call = next(
-            (c for c in st.selectbox.call_args_list if c.args and c.args[0] == "Speed"),  # ty: ignore[unresolved-attribute]
-            None,
+            (c for c in calls if c.kwargs["key"] == "speed_af_heart"), None
         )
         assert speed_call is not None
         assert speed_call.kwargs["options"] == SPEED_OPTIONS
@@ -1115,9 +1115,19 @@ class TestRenderVoiceCard:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
         calls = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
-        speed_call = next(c for c in calls if c.args and c.args[0] == "Speed")
+        speed_call = next(c for c in calls if c.kwargs["key"] == "speed_af_heart")
         assert speed_call.kwargs["format_func"](1.0) == "1.0x"
         assert speed_call.kwargs["format_func"](0.7) == "0.7x"
+
+    def test_speed_label_names_its_voice(self) -> None:
+        # Collapsed on screen, the label is still the dropdown's accessible name;
+        # a bare "Speed" read the same on all twenty cards.
+        self._reset_mocks()
+        render_voice_card("af_heart", "hello", "a")
+        calls = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
+        speed_call = next(c for c in calls if c.kwargs["key"] == "speed_af_heart")
+        assert speed_call.args[0] == "Speed for Heart (female) — A"
+        assert speed_call.kwargs["label_visibility"] == "collapsed"
 
     def test_renders_audio_when_cached(self) -> None:
         self._reset_mocks()

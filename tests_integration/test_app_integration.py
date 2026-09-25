@@ -288,6 +288,16 @@ class TestVoiceCards:
         for voice in ("af_heart", "af_bella", "af_nicole"):
             assert at.selectbox(key=f"speed_{voice}").value == 1.0
 
+    def test_each_speed_selectbox_is_labelled_for_its_voice(self) -> None:
+        # The label is collapsed on screen but is the accessible name, so every
+        # card's must differ; a shared "Speed" gave twenty identical controls.
+        at = _run_app()
+        labels = {
+            s.key: s.label for s in at.selectbox if s.key and s.key.startswith("speed_")
+        }
+        assert labels["speed_af_heart"] == "Speed for Heart (female) — A"
+        assert len(set(labels.values())) == len(labels) == 6
+
     def test_changing_card_speed_reruns_cleanly(self) -> None:
         # The per-card speed selectbox must rerun the app cleanly and reflect the
         # new value. (AppTest can't observe fragment-scoped reruns, so this

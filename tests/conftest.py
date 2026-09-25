@@ -39,10 +39,13 @@ _st = MagicMock()
 _st.cache_resource = _passthrough_decorator("cache_resource")
 _st.cache_data = _passthrough_decorator("cache_data")
 _st.fragment = _passthrough_decorator("fragment")
-_st.selectbox.side_effect = lambda label, **_kw: {
-    "Language": "American English",
-    "Speed": 1.0,
-}.get(label, MagicMock())
+# Speed labels name their voice ("Speed for Heart (female) — A"), so match the
+# prefix rather than one exact label.
+_st.selectbox.side_effect = lambda label, **_kw: (
+    1.0
+    if label.startswith("Speed for ")
+    else {"Language": "American English"}.get(label, MagicMock())
+)
 _st.segmented_control.side_effect = lambda label, **_kw: (
     "All" if label == "Voice gender" else MagicMock()
 )

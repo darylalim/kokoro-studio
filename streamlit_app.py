@@ -522,7 +522,10 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
             # neighbouring cards broke at different points.
             with st.container(horizontal=True, width="content", gap="xsmall"):
                 card_speed = st.selectbox(
-                    "Speed",
+                    # Collapsed, but still the dropdown's accessible name, so it
+                    # names its voice: a bare "Speed" was announced identically
+                    # on every card, with nothing to say which voice it set.
+                    f"Speed for {_format_voice(voice)}",
                     options=SPEED_OPTIONS,
                     index=DEFAULT_SPEED_INDEX,
                     key=f"speed_{voice}",
