@@ -90,9 +90,11 @@ DEFAULT_SPEED_INDEX: int = SPEED_OPTIONS.index(1.0)
 
 AUDIO_CACHE_LIMIT: int = 20
 
-# Fixed width of a voice card's speed box and Play button. Clears "1.0x" plus
-# the chevron, and the icon plus "Play" (~74 px measured), with a little room;
-# the voice name takes whatever the row has left.
+# Fixed width of a voice card's speed box and Play button; the voice name takes
+# whatever the row has left. Measured in the stock theme: Play is the tighter of
+# the two, clipping to "P…" at 74 px and whole from 78 px ("1.0x" plus its
+# chevron holds down to 70 and clips to "1.0" at 66). 96 leaves room for a
+# slightly wider font; a test holds it at or above the 78 px floor.
 CARD_CONTROL_WIDTH: int = 96
 
 # Sized to balance the composer against the voice list beside it, not to hold

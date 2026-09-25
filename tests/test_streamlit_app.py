@@ -989,6 +989,13 @@ class TestRenderVoiceCard:
         assert speed.kwargs["width"] == CARD_CONTROL_WIDTH
         assert play.kwargs["width"] == CARD_CONTROL_WIDTH
 
+    def test_card_control_width_clears_the_measured_label_floor(self) -> None:
+        # A fixed width is only safe above what its labels need. Measured in the
+        # stock theme, Play clipped to "P…" at 74 px and fit whole from 78 px,
+        # and "1.0x" clipped to "1.0" at 66; nothing else would catch a width
+        # trimmed below that, since the mocks never lay anything out.
+        assert CARD_CONTROL_WIDTH >= 78
+
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
