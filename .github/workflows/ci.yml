@@ -46,7 +46,7 @@ jobs:
           # writes uv.lock locally -- `uv --version`, not .venv/pyvenv.cfg, whose
           # `uv =` line only records the uv that created the venv. Bump when the
           # local uv is upgraded.
-          version: "0.12.18"
+          version: "0.12.19"
           python-version: "3.12"
 
       # --locked installs exactly from uv.lock AND fails if the lock has drifted
