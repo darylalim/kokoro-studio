@@ -44,11 +44,11 @@ _st.selectbox.side_effect = lambda label, **_kw: {
     "Speed": 1.0,
 }.get(label, MagicMock())
 _st.segmented_control.side_effect = lambda label, **_kw: (
-    "All" if label == "Gender" else MagicMock()
+    "All" if label == "Voice gender" else MagicMock()
 )
 _st.button.return_value = False
 _st.text_area.return_value = ""
-_st.columns.side_effect = lambda spec: [
+_st.columns.side_effect = lambda spec, **_kw: [
     MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
 ]
 _st.session_state = {}

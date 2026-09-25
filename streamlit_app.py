@@ -90,6 +90,19 @@ DEFAULT_SPEED_INDEX: int = SPEED_OPTIONS.index(1.0)
 
 AUDIO_CACHE_LIMIT: int = 20
 
+# Fixed width of a voice card's speed box and Play button. Clears "1.0x" plus
+# the chevron, and the icon plus "Play" (~74 px measured), with a little room;
+# the voice name takes whatever the row has left.
+CARD_CONTROL_WIDTH: int = 96
+
+# Sized to balance the composer against the voice list beside it, not to hold
+# long text (the box scrolls and has a resize handle). At the old 500 px it was
+# mostly empty and pushed Tokenize to the fold at 1440x900; at 300 the composer
+# *with* the self-opening phoneme expander ends about where the six one-row
+# voice cards do, which is the state a working session sits in. 300 px still
+# shows a dozen lines — the whole 100-400 phoneme sweet spot.
+TEXT_AREA_HEIGHT: int = 300
+
 _PHONEME_MULTIPLIERS: dict[str, float] = {
     "a": 0.85,
     "b": 0.85,
@@ -344,22 +357,22 @@ def _render_sample_buttons(lang_code: str) -> None:
     buttons = SAMPLE_BUTTONS.get(lang_code, [])
     if not buttons:
         return
-    # Columns, not st.container(horizontal=True). The 1.61 guidance prefers a
-    # horizontal container for a button row, but its children get
-    # `flex: 1 1 fit-content` and so grow from their own text width: measured
-    # 246/200/235 px against 227 for an even third, a 23% spread that tracks
-    # label length. Columns give exact thirds, which is what this row wants.
-    cols = st.columns(len(buttons))
-    for col, entry in zip(cols, buttons):
-        with col:
+    # A wrapping horizontal container, not st.columns. This row used to span half
+    # a full-width page and wanted exact thirds; beside a sidebar the composer is
+    # ~270-500 px, and thirds of that are narrower than the labels — at a 1024 px
+    # window every label broke mid-word ("Rando/m quote", "Frank/enstei/n"). A
+    # horizontal container sizes each button from its own label and wraps *whole
+    # buttons* onto a new row when they stop fitting, so a label never breaks.
+    # The cost is widths that track label length rather than even thirds.
+    with st.container(horizontal=True):
+        for entry in buttons:
             st.button(
                 entry.label,
                 icon=entry.icon,
                 key=f"sample_{lang_code}_{Path(entry.filename).stem}",
                 width="stretch",
-                # 1.63 stopped wrapping a widget placed directly in a column:
-                # at a 900 px window "Pride & Prejudice" rendered "Pride & …".
-                # Wrapping restores the 1.61 row, at the cost of ragged heights.
+                # Only reached if one label alone outgrows the column; it then
+                # wraps inside its button instead of ellipsizing ("Pride & …").
                 wrap=True,
                 on_click=_set_text_from_sample,
                 args=(lang_code, entry.filename, entry.is_random),
@@ -477,51 +490,68 @@ def generate_one(
 @st.fragment
 def render_voice_card(voice: str, text: str, lang_code: str) -> None:
     with st.container(border=True):
-        # The title is reserved here and written at the end of the fragment. Its
-        # badge depends on whether this card has audio, and on the run that
-        # generates some, it does not yet — so emitting the title in place left
-        # the one card that had just produced a clip as the only card without a
-        # badge, until some unrelated rerun corrected it. `st.container`, not
-        # `st.empty`: a placeholder clears at the top of each rerun, which would
-        # unmount and remount the title on every fragment run.
-        title_slot = st.container()
+        # One row per voice — name, then speed and Play — so the cards read down
+        # the page like a table: an idle card is one control-height tall rather
+        # than a title line stacked over a control row, and Play sits in one
+        # column down the list. A horizontal container rather than st.columns,
+        # because this row is "fill plus fixed", not a proportional grid. Ratio
+        # columns could not hold both ends: at a 1024 px window a card is under
+        # 300 px, and [1.6, 1, 1] left speed and Play 66 px each, which
+        # truncated them to "1.(" and "P…"; the same ratios at 1920 px blew the
+        # two controls up to 190 px apiece. Here the controls keep a fixed width
+        # and the name takes the rest, so their right edges line up across cards
+        # of one width (tail cards, inset by the expander's padding, sit ~17 px
+        # further in). And a horizontal container wraps by its *own* width,
+        # where columns only stack by viewport (<=640 px): when a card is too
+        # narrow for one line, the controls drop under the name as a unit — see
+        # the inner container — rather than squeezing until their labels clip.
+        with st.container(horizontal=True, vertical_alignment="center"):
+            # The title is reserved here and written at the end of the fragment.
+            # Its badge depends on whether this card has audio, and on the run
+            # that generates some, it does not yet — so emitting the title in
+            # place left the one card that had just produced a clip as the only
+            # card without a badge, until some unrelated rerun corrected it.
+            # `st.container`, not `st.empty`: a placeholder clears at the top of
+            # each rerun, which would unmount and remount the title on every
+            # fragment run. Stretch width (the default) is what makes the name
+            # the row's flexible part, pushing the controls to the right edge.
+            title_slot = st.container()
+            # Grouped at content width so speed and Play wrap together. Loose
+            # in the outer row they wrap one at a time, so a short name kept its
+            # speed box on the first line and sent only Play to the second, and
+            # neighbouring cards broke at different points.
+            with st.container(horizontal=True, width="content", gap="xsmall"):
+                card_speed = st.selectbox(
+                    "Speed",
+                    options=SPEED_OPTIONS,
+                    index=DEFAULT_SPEED_INDEX,
+                    key=f"speed_{voice}",
+                    label_visibility="collapsed",
+                    format_func=lambda x: f"{x}x",
+                    width=CARD_CONTROL_WIDTH,
+                    # Cards inside the collapsed "Show all voices" expander are
+                    # not drawn, and Streamlit discards the state of any widget a
+                    # run did not draw. Without this a tail voice's speed snapped
+                    # back to 1.0x on reopen — and because _cache_key includes the
+                    # speed, that also demoted its generated clip to a "speed
+                    # changed" stale preview. "session", not "page": Streamlit
+                    # documents "page" as covering a hidden widget too, and in a
+                    # browser it holds here as well, but AppTest builds a fresh
+                    # PagesManager per run, so every run reads as a page switch
+                    # and "page" drops the value. Only "session" is visible to the
+                    # guard test; in a single-page app they're the same.
+                    persist_state="session",
+                )
+                play_clicked = st.button(
+                    "Play",
+                    icon=":material/play_arrow:",
+                    key=f"play_{voice}",
+                    type="primary",
+                    width=CARD_CONTROL_WIDTH,
+                    disabled=not text.strip(),
+                )
         stale_key = _stale_cached_key(voice, text, lang_code)
         cached = st.session_state[stale_key] if stale_key is not None else None
-        # Columns, not st.container(horizontal=True). A horizontal container
-        # sizes children from their intrinsic width (`flex: 1 1 fit-content`),
-        # which measured 358 px of selectbox against 306 px of button in a 680 px
-        # row. The even split here is deliberate, so this stays a proportional
-        # grid — the case the guidance still reserves columns for.
-        speed_col, play_col = st.columns([1, 1])
-        with speed_col:
-            card_speed = st.selectbox(
-                "Speed",
-                options=SPEED_OPTIONS,
-                index=DEFAULT_SPEED_INDEX,
-                key=f"speed_{voice}",
-                label_visibility="collapsed",
-                format_func=lambda x: f"{x}x",
-                # Cards inside the collapsed "Show all voices" expander are not
-                # drawn, and Streamlit discards the state of any widget a run did
-                # not draw. Without this a tail voice's speed snapped back to 1.0x
-                # on reopen — and because _cache_key includes the speed, that also
-                # demoted its generated clip to a "speed changed" stale preview.
-                # "session", not "page": Streamlit documents "page" as covering a
-                # hidden widget too, and in a browser it holds here as well, but
-                # AppTest builds a fresh PagesManager per run, so every run reads
-                # as a page switch and "page" drops the value. Only "session" is
-                # visible to the guard test; in a single-page app they're the same.
-                persist_state="session",
-            )
-        with play_col:
-            play_clicked = st.button(
-                "Play",
-                icon=":material/play_arrow:",
-                key=f"play_{voice}",
-                type="primary",
-                width="stretch",
-                disabled=not text.strip(),
-            )
         key = _cache_key(voice, text, card_speed, lang_code)
         # Register the key whose audio this card is actually showing so a Play in
         # any other fragment never evicts it: the current-speed take when it exists,
@@ -533,7 +563,16 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
         if play_clicked:
             try:
                 pipeline = load_pipeline()
-                result = generate_one(text, voice, pipeline, card_speed, lang_code)
+                # The chunk-by-chunk status is progress, not a record: once the
+                # clip is stored the player below says the same thing, and a
+                # lingering "complete!" block was a third row in a card built to
+                # be one row plus its player — one that then vanished on the
+                # card's next rerun, jolting the player up. So it renders into a
+                # placeholder cleared on success only; on failure the status (in
+                # its error state) stays above the message as its context.
+                progress = st.empty()
+                with progress.container():
+                    result = generate_one(text, voice, pipeline, card_speed, lang_code)
                 result["seq"] = _next_audio_seq()
                 st.session_state[key] = result
                 # The card now displays this just-generated take, so re-register
@@ -544,6 +583,7 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
                     st.session_state.get("_displayed_card_keys", {}).values()
                 )
                 _evict_old_audio(protect | {key})
+                progress.empty()
             except ValueError as e:
                 # Only the benign "no audio" case gets a friendly message;
                 # unexpected ValueErrors keep the developer-facing traceback.
@@ -571,19 +611,25 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
             st.markdown(f"**{_format_voice(voice)}**{badge}")
         if key in st.session_state:
             wav = st.session_state[key]["wav"]
-            st.audio(wav, format="audio/wav")
-            st.download_button(
-                label="Download",
-                icon=":material/download:",
-                data=wav,
-                file_name=f"{voice}_{card_speed}x.wav",
-                mime="audio/wav",
-                key=f"download_{voice}",
-                # Nothing on the page depends on the click, and the default
-                # "rerun" would re-render this fragment while the browser is
-                # still fetching the file.
-                on_click="ignore",
-            )
+            # Player and Download share a row — the same stretch-plus-fit shape
+            # as the controls row: the player takes whatever Download leaves.
+            # Streamlit gives st.audio a ~14rem flex basis in a horizontal
+            # container, so in a card too narrow for both, Download wraps under
+            # the player rather than shrinking it to a stub with no seek bar.
+            with st.container(horizontal=True, vertical_alignment="center"):
+                st.audio(wav, format="audio/wav")
+                st.download_button(
+                    label="Download",
+                    icon=":material/download:",
+                    data=wav,
+                    file_name=f"{voice}_{card_speed}x.wav",
+                    mime="audio/wav",
+                    key=f"download_{voice}",
+                    # Nothing on the page depends on the click, and the default
+                    # "rerun" would re-render this fragment while the browser is
+                    # still fetching the file.
+                    on_click="ignore",
+                )
         elif cached is not None:
             st.caption("Click Play to refresh (speed changed)")
             st.audio(cached["wav"], format="audio/wav")
@@ -591,6 +637,14 @@ def render_voice_card(voice: str, text: str, lang_code: str) -> None:
 
 def render_phonemes(phonemes: str, *, expanded: bool = False) -> None:
     with st.expander("Phoneme tokens", expanded=expanded):
+        # Unwrapped, deliberately, though at a 1440 px window the composer column
+        # shows only ~50 of a typical 275 phonemes before scrolling. Misaki marks
+        # stress with ˈ and ˌ *inside* words, and Unicode line breaking (UAX #14,
+        # class BB) allows a break before both, so `wrap_lines=True` split words
+        # at their stress marks — "fˈɑðəɹ" read as "f" / "ˈɑðəɹ" in 3 of 5 line
+        # breaks at 1440 px.
+        # This is the readout users copy `[word](/phonemes/)` overrides from; a
+        # scroll hides tokens, a mid-word break misstates them.
         st.code(phonemes)
 
 
@@ -614,6 +668,45 @@ def _render_persistent_phonemes(text: str, lang_code: str) -> None:
         render_phonemes(saved[2], expanded=True)
 
 
+def _render_tokenize_row(text: str, lang_code: str) -> None:
+    # Tokenize and the length caption share a row: the caption is the button's
+    # readout (an estimate before, the exact count after), so it sits beside it
+    # rather than a row further down. A horizontal container because this is
+    # fit-plus-fill: the button at its content width, the caption the rest.
+    with st.container(horizontal=True, vertical_alignment="center"):
+        clicked = st.button(
+            "Tokenize",
+            icon=":material/graphic_eq:",
+            disabled=not text.strip(),
+        )
+        # Reserved and filled last, as the voice card does with its title: the
+        # caption must follow this run's tokenization, but tokenizing *inside*
+        # the row made `load_tokenizer`'s first-use spinner a flex item in it,
+        # which knocked the caption onto a second line for the whole load.
+        caption_slot = st.container()
+    # Out here, so the spinner and any error span the column below the row.
+    if clicked:
+        try:
+            st.session_state["last_phonemes"] = (
+                text,
+                lang_code,
+                tokenize_text(text, lang_code),
+            )
+        except Exception as e:  # noqa: BLE001
+            # Same UI guard as the per-card Play handler: a G2P failure must
+            # degrade in place rather than replace the whole page with a
+            # traceback. This is the only unwrapped path that loads a
+            # tokenizer, so it is where a missing UniDic dictionary surfaces.
+            st.error(_tokenize_error_message(lang_code, e))
+    with caption_slot:
+        _render_length_caption(text, lang_code)
+
+
+# The sidebar keeps Streamlit's default width and "auto" state (hidden on
+# phones). A narrower one was measured and rejected: 256 px gave the main area
+# 44 px, but split the pronunciation tips' code spans mid-token ("[Kokoro](/k" /
+# "ˈOkəɹO/)") — the one thing a syntax reference must not do — and the voice
+# cards' controls wrap as a unit, so they never needed the room.
 st.set_page_config(page_title="Kokoro Studio", page_icon="🎙️", layout="wide")
 st.title("Kokoro Studio")
 
@@ -636,69 +729,52 @@ st.caption(
     "enter some. Synthesis runs offline on this Mac."
 )
 
-# Labeled and fixed-width, not the stretched default. At layout="wide" a
-# stretched selectbox spans the whole viewport directly under the title, where it
-# reads as a banner rather than as the app's primary control; a bare value with no
-# label compounds that. 320px comfortably clears the longest option ("Brazilian
-# Portuguese"), and st.selectbox takes only "stretch" or an int — there is no
-# fit-to-content width to use instead.
-language = st.selectbox(
-    "Language",
-    options=list(LANGUAGES.keys()),
-    width=320,
-    key="language",
-)
-lang_code = LANGUAGES[language]
-
-input_col, controls_col = st.columns(2)
-
-with input_col:
-    text_input = st.text_area(
-        label="Text",
-        placeholder="Start typing here or paste any text you want to turn into lifelike speech...",
-        height=500,
-        key="text_input",
-        label_visibility="collapsed",
+# The sidebar holds the two app-level filters and the reference note — the
+# settings that decide *which* voices the main area shows, and a note consulted
+# rather than read in sequence. Moving them out lets the composer and the voice
+# list start directly under the caption. The text and the voices themselves stay
+# in the main area: they are the content, and on a phone the sidebar starts
+# hidden, where only settings can afford to be one tap away.
+with st.sidebar:
+    # Stretched to the sidebar now. The fixed 320 px width it used to carry only
+    # kept a full-viewport dropdown under the title from reading as a banner.
+    language = st.selectbox(
+        "Language",
+        options=list(LANGUAGES.keys()),
+        key="language",
     )
-    _render_sample_buttons(lang_code)
-    tokenize_clicked = st.button(
-        "Tokenize",
-        icon=":material/graphic_eq:",
-        disabled=not text_input.strip(),
+    lang_code = LANGUAGES[language]
+    gender_selection = st.segmented_control(
+        "Voice gender",
+        options=["All", "Female", "Male"],
+        default="All",
+        required=True,
+        key="gender",
     )
-    if tokenize_clicked:
-        try:
-            st.session_state["last_phonemes"] = (
-                text_input,
-                lang_code,
-                tokenize_text(text_input, lang_code),
-            )
-        except Exception as e:  # noqa: BLE001
-            # Same UI guard as the per-card Play handler: a G2P failure must
-            # degrade in place rather than replace the whole page with a
-            # traceback. This is the only unwrapped path that loads a
-            # tokenizer, so it is where a missing UniDic dictionary surfaces.
-            st.error(_tokenize_error_message(lang_code, e))
-    _render_length_caption(text_input, lang_code)
-    _render_persistent_phonemes(text_input, lang_code)
     # A bordered container, not st.info. The alert component renders
     # role="status" for info and success, i.e. an ARIA live region, which asks a
     # screen reader to announce this as a status update; the note is permanent
     # reference content that belongs in the normal reading order. A bordered
     # container groups it just as well with no announcement semantics.
     with st.container(border=True):
-        st.markdown(":material/lightbulb: **Note**")
+        st.markdown(":material/lightbulb: **Pronunciation tips**")
         st.markdown(PRONUNCIATION_TIPS)
 
-with controls_col:
-    gender_selection = st.segmented_control(
-        "Gender",
-        options=["All", "Female", "Male"],
-        default="All",
-        required=True,
-        key="gender",
+input_col, voices_col = st.columns(2)
+
+with input_col:
+    text_input = st.text_area(
+        label="Text",
+        placeholder="Start typing here or paste any text you want to turn into lifelike speech...",
+        height=TEXT_AREA_HEIGHT,
+        key="text_input",
         label_visibility="collapsed",
     )
+    _render_sample_buttons(lang_code)
+    _render_tokenize_row(text_input, lang_code)
+    _render_persistent_phonemes(text_input, lang_code)
+
+with voices_col:
     gender_code = _gender_code_from_selection(gender_selection)
     voices = _filter_voices_by_gender(get_voices(lang_code), gender_code)
     # Reset the protect map on every full rerun — even when the filter empties the
@@ -710,13 +786,18 @@ with controls_col:
     st.session_state["_displayed_card_keys"] = {}
     if voices:
         visible, hidden = _split_voices_for_display(voices, None)
-        for voice in visible:
-            render_voice_card(voice, text_input, lang_code)
+        # A tighter gap than the column's default 1rem: an idle card is now only
+        # 72 px tall, so the stock gap was nearly a quarter of one, and the list
+        # read as six separate panels rather than one scannable table.
+        with st.container(gap="xsmall"):
+            for voice in visible:
+                render_voice_card(voice, text_input, lang_code)
         if hidden:
             # `on_change="rerun"` is what makes `.open` meaningful. Left at the
             # default, an expander computes its whole body even while collapsed —
             # for American English that is 14 extra voice cards, each with a
-            # session_state scan and three widgets, rebuilt on every rerun.
+            # session_state scan and two widgets (three once it has a Download),
+            # rebuilt on every rerun.
             # Opening now costs one rerun; every other rerun stops paying for it.
             # `on_change` makes the expander a widget, so its open state is subject
             # to the same collection as any other: a language or filter leaving
@@ -763,7 +844,7 @@ with controls_col:
             )
             st.session_state["_show_all_voices_pref"] = bool(more_voices.open)
             if more_voices.open:
-                with more_voices:
+                with more_voices, st.container(gap="xsmall"):
                     for voice in hidden:
                         render_voice_card(voice, text_input, lang_code)
     else:

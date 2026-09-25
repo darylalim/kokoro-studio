@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from streamlit.proto.Block_pb2 import Block as BlockProto
+from streamlit.proto.LabelVisibility_pb2 import LabelVisibility
 from streamlit.testing.v1 import AppTest
+from streamlit.testing.v1.element_tree import Block, Button, Markdown
 
 # The initial run touches the local model snapshot and lazily loads a misaki
 # tokenizer when Tokenize is clicked, so allow generous headroom.
@@ -41,6 +44,32 @@ def _speed_keys(at: AppTest) -> set[str]:
     return {s.key for s in at.selectbox if s.key and s.key.startswith("speed_")}
 
 
+TIPS_SYNTAX = "[word](/phonemes/)"
+TIPS_HEADING = "Pronunciation tips"
+
+
+def _markdown_containing(root: Block, needle: str) -> list[str]:
+    return [m.value for m in root.markdown if needle in (m.value or "")]
+
+
+# Common to the estimate ("**~9 phonemes** — …") and the exact count, and absent
+# from every other caption — the orientation line has an em dash but no count.
+LENGTH_CAPTION = " phonemes** — "
+
+
+def _length_captions(root: Block) -> list[str]:
+    return [c.value for c in root.caption if LENGTH_CAPTION in (c.value or "")]
+
+
+def _composer_and_card_buttons(root: Block) -> list[str]:
+    """Labels of the buttons that belong in main: samples, Tokenize, every Play."""
+    return [
+        b.label
+        for b in root.button
+        if b.label in ("Tokenize", "Play") or (b.key or "").startswith("sample_")
+    ]
+
+
 class TestInitialRender:
     def test_has_no_exception(self) -> None:
         at = _run_app()
@@ -65,6 +94,113 @@ class TestInitialRender:
         play_buttons = [b for b in at.button if b.label == "Play"]
         assert play_buttons
         assert all(b.disabled for b in play_buttons)
+
+
+class TestSidebar:
+    """The sidebar holds the settings and the reference note; main holds the work.
+
+    Language and gender decide which voices main shows, and the tips are
+    consulted rather than read in sequence, so those three live in the sidebar.
+    The composer and the voice cards are the content and stay in main — on a
+    phone the sidebar starts hidden. Placement is read from `at.sidebar` and
+    `at.main`, never from the page as a whole: `at.selectbox(key=...)` searches
+    both roots and so passes wherever the widget lands.
+    """
+
+    def test_language_and_gender_filters_render_in_the_sidebar(self) -> None:
+        at = _run_app()
+        assert [s.key for s in at.sidebar.selectbox] == ["language"]
+        assert "language" not in [s.key for s in at.main.selectbox]
+        assert [s.key for s in at.sidebar.segmented_control] == ["gender"]
+        assert not at.main.segmented_control
+
+    def test_filter_labels_are_visible(self) -> None:
+        # The gender control used to sit label-collapsed directly above the cards
+        # it filters. In the sidebar it is away from them, so it names itself.
+        at = _run_app()
+        language = at.sidebar.selectbox(key="language")
+        gender = at.sidebar.segmented_control(key="gender")
+        assert language.label == "Language"
+        assert gender.label == "Voice gender"
+        visible = LabelVisibility.LabelVisibilityOptions.VISIBLE
+        assert language.proto.label_visibility.value == visible
+        assert gender.proto.label_visibility.value == visible
+
+    def test_pronunciation_tips_render_once_in_the_sidebar(self) -> None:
+        at = _run_app()
+        assert len(_markdown_containing(at.sidebar, TIPS_SYNTAX)) == 1
+        assert len(_markdown_containing(at.sidebar, TIPS_HEADING)) == 1
+        assert not _markdown_containing(at.main, TIPS_SYNTAX)
+        assert not _markdown_containing(at.main, TIPS_HEADING)
+        # Heading directly above the body in one bordered box — the grouping
+        # that stands in for st.info without its live region.
+        boxes = [
+            node
+            for node in at.sidebar
+            if isinstance(node, Block)
+            and any(
+                isinstance(c, Markdown) and TIPS_SYNTAX in c.value
+                for c in node.children.values()
+            )
+        ]
+        assert len(boxes) == 1
+        (box,) = boxes
+        assert box.proto.flex_container.border
+        heading, body = list(box.children.values())[:2]
+        assert isinstance(heading, Markdown) and TIPS_HEADING in heading.value
+        assert isinstance(body, Markdown) and TIPS_SYNTAX in body.value
+
+    def test_composer_and_voice_cards_render_in_main(self) -> None:
+        at = _run_app()
+        assert [t.key for t in at.main.text_area] == ["text_input"]
+        assert not at.sidebar.text_area
+        assert not _composer_and_card_buttons(at.sidebar)
+        labels = _composer_and_card_buttons(at.main)
+        assert labels.count("Tokenize") == 1
+        assert labels.count("Play") == 6
+        samples = [b for b in at.main.button if (b.key or "").startswith("sample_")]
+        assert len(samples) == 3
+        # The tail cards too: the expander sits in main's voice column.
+        _set_expander(at, True)
+        at.run()
+        assert not _composer_and_card_buttons(at.sidebar)
+        plays = [b for b in at.button if b.label == "Play"]
+        assert len(plays) > 6
+        assert _composer_and_card_buttons(at.main).count("Play") == len(plays)
+
+    def test_tokenize_row_and_phoneme_readout_render_in_main(self) -> None:
+        # Drawn by helpers called under `input_col`, so the text area staying in
+        # main says nothing about them. Tokenize is found page-wide on purpose:
+        # a misplaced button still gets clicked, and the asserts below fail.
+        at = _run_app()
+        at.text_area(key="text_input").input("hello world").run()
+        next(b for b in at.button if b.label == "Tokenize").click().run()
+        assert not at.exception
+        phonemes = at.session_state["last_phonemes"][2]
+        assert phonemes
+        assert "Tokenize" not in [b.label for b in at.sidebar.button]
+        assert not _length_captions(at.sidebar)
+        assert "Phoneme tokens" not in [e.label for e in at.sidebar.expander]
+        assert phonemes not in [c.value for c in at.sidebar.code]
+        # One horizontal row in main holds the button and the caption, and the
+        # caption is this run's exact count, not the "~" estimate: its slot is
+        # filled only after the click has tokenized.
+        (row,) = [
+            node
+            for node in at.main
+            if isinstance(node, Block)
+            and any(
+                isinstance(c, Button) and c.label == "Tokenize"
+                for c in node.children.values()
+            )
+        ]
+        horizontal = BlockProto.FlexContainer.Direction.HORIZONTAL
+        assert row.proto.flex_container.direction == horizontal
+        assert _length_captions(at.main) == _length_captions(row)
+        (caption,) = _length_captions(row)
+        assert f"**{len(phonemes)} phonemes**" in caption
+        (tokens,) = [e for e in at.main.expander if e.label == "Phoneme tokens"]
+        assert [c.value for c in tokens.code] == [phonemes]
 
 
 class TestPronunciationNote:
@@ -134,9 +270,10 @@ class TestGenderFilter:
 
 class TestLanguageSwitching:
     def test_switching_to_japanese_changes_voice_list(self) -> None:
+        # Driven through the sidebar, where the Language selectbox lives.
         at = _run_app()
         american_titles = set(_voice_titles(at))
-        at.selectbox(key="language").select("Japanese").run()
+        at.sidebar.selectbox(key="language").select("Japanese").run()
         japanese_titles = set(_voice_titles(at))
         assert japanese_titles
         assert japanese_titles != american_titles

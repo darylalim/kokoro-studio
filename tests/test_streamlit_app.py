@@ -1,5 +1,8 @@
+import runpy
+import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
@@ -10,6 +13,7 @@ from conftest import DECORATOR_KWARGS
 from streamlit_app import (
     _PHONEME_MULTIPLIERS,
     AUDIO_CACHE_LIMIT,
+    CARD_CONTROL_WIDTH,
     DEFAULT_SPEED_INDEX,
     ESPEAK_LANGUAGES,
     LANGUAGES,
@@ -34,6 +38,7 @@ from streamlit_app import (
     _render_length_caption,
     _render_persistent_phonemes,
     _render_sample_buttons,
+    _render_tokenize_row,
     _set_text_from_sample,
     _split_voices_for_display,
     _text_digest,
@@ -801,6 +806,65 @@ class TestFindStaleCachedAudio:
         self._clear_audio_cache()
 
 
+class _ContainerTracker:
+    """Records which `st.container` blocks are open as each element draws.
+
+    `st` is one MagicMock, so every `st.container(...)` hands back the same
+    object and entering it leaves nothing a test can read. Moving an element
+    into or out of a `with` block changes no call argument and no call order;
+    the only observable difference is *which containers are open* at that
+    moment. So `container` — patched in as `st.container`'s side effect — gives
+    each container a real enter/exit that pushes and pops its name, and
+    `frames` records `(event, open containers)` both as each container is
+    created (`"opens <name>"` — the frame it lives in) and as each element
+    patched with a `draws` side effect is drawn. Containers take `names` in
+    creation order, so a failure reads `("card",) != ("card", "title_slot")`
+    rather than a tuple of MagicMock ids; `opened` keeps the options each was
+    created with.
+    """
+
+    def __init__(self, *names: str) -> None:
+        self._names = names
+        self._stack: list[str] = []
+        self.opened: dict[str, dict[str, Any]] = {}
+        self.frames: list[tuple[str, tuple[str, ...]]] = []
+
+    def container(self, **kwargs: Any) -> MagicMock:
+        n = len(self.opened)
+        name = self._names[n] if n < len(self._names) else f"container{n}"
+        self.opened[name] = kwargs
+        self.frames.append((f"opens {name}", tuple(self._stack)))
+        cm = MagicMock(name=name)
+
+        def _enter() -> MagicMock:
+            self._stack.append(name)
+            return cm
+
+        def _exit(*_a: Any) -> bool:
+            self._stack.pop()
+            return False  # never swallow what the block raised
+
+        cm.__enter__.side_effect = _enter
+        cm.__exit__.side_effect = _exit
+        return cm
+
+    def draws(
+        self, element: str, returns: Any = None, *, raises: Exception | None = None
+    ) -> Callable[..., Any]:
+        """A side effect that records `element`'s frame, then returns or raises."""
+
+        def _draw(*_a: Any, **_kw: Any) -> Any:
+            self.frames.append((element, tuple(self._stack)))
+            if raises is not None:
+                raise raises
+            return returns
+
+        return _draw
+
+    def frames_of(self, *events: str) -> list[tuple[str, tuple[str, ...]]]:
+        return [f for f in self.frames if f[0] in events]
+
+
 class TestRenderVoiceCard:
     @staticmethod
     def _reset_mocks() -> None:
@@ -821,69 +885,109 @@ class TestRenderVoiceCard:
         st.session_state.pop("_displayed_card_keys", None)
         st.session_state.pop("_audio_seq", None)
 
+    @staticmethod
+    def _render_tracking_containers(
+        voice: str, text: str, lang_code: str
+    ) -> tuple[dict[str, dict[str, Any]], list[tuple[str, tuple[str, ...]]]]:
+        """Render a card under a _ContainerTracker; return its options and frames.
+
+        Containers are named in the order the card creates them — pinned by
+        test_opens_its_own_containers_in_order, with `player_row` created only
+        when audio exists at the current speed.
+        """
+        tracker = _ContainerTracker(
+            "card", "row", "title_slot", "controls", "player_row"
+        )
+        with (
+            patch.object(st, "container", side_effect=tracker.container),
+            patch.object(st, "markdown", side_effect=tracker.draws("title")),
+            # 1.0 is conftest's speed too, so cache keys line up with it.
+            patch.object(st, "selectbox", side_effect=tracker.draws("speed", 1.0)),
+            patch.object(st, "button", side_effect=tracker.draws("play", False)),
+            patch.object(st, "caption", side_effect=tracker.draws("caption")),
+            patch.object(st, "audio", side_effect=tracker.draws("audio")),
+            patch.object(st, "download_button", side_effect=tracker.draws("download")),
+        ):
+            render_voice_card(voice, text, lang_code)
+        return tracker.opened, tracker.frames
+
     def test_opens_its_own_containers_in_order(self) -> None:
         # Opened inside the fragment, not passed in: a shared container would
         # make every card one fragment instance. The whole *sequence* is
         # asserted rather than `assert_any_call(border=True)`, because `st`
-        # here is one MagicMock: `st.container(border=True)` and the bare
-        # `st.container()` return the identical object, so nothing downstream
-        # can tell which is which. Call order is the only distinguishing
-        # signal, which makes this equality the guard for two claims at once —
-        # that the border lands on the card and not the title slot, and that
-        # the title slot is reserved at all (its content is written last, see
-        # test_badge_appears_on_the_run_that_generates). Both mutations pass
-        # under `assert_any_call`.
+        # here is one MagicMock: every `st.container(...)` returns the
+        # identical object, so nothing downstream can tell which is which. Call
+        # order is the only distinguishing signal, which makes this equality
+        # the guard for every container's role at once:
+        #   - the border lands on the card, not on anything inside it;
+        #   - the row is horizontal and centred — name, speed and Play on one
+        #     line, so an idle card is one control-height tall and Play sits in
+        #     one column down the list;
+        #   - the title slot is reserved at all (its content is written last,
+        #     see test_badge_appears_on_the_run_that_generates), and bare: its
+        #     default stretch width is what makes the name the row's flexible
+        #     part and pushes the controls to the right edge;
+        #   - the controls group is horizontal at content width, so when a card
+        #     is too narrow for one line speed and Play wrap under the name
+        #     together rather than one at a time.
+        # Moving the border or dropping the slot passes under `assert_any_call`.
+        # No audio is cached here, so the card opens no player row (see
+        # test_player_and_download_share_a_row).
         self._reset_mocks()
         render_voice_card("af_heart", "hello", "a")
         assert st.container.call_args_list == [  # ty: ignore[unresolved-attribute]
             call(border=True),
+            call(horizontal=True, vertical_alignment="center"),
             call(),
+            call(horizontal=True, width="content", gap="xsmall"),
         ]
 
     def test_title_is_written_into_the_reserved_slot(self) -> None:
         # The sequence test above cannot see this one: dedenting the title out
         # of `with title_slot:` so it renders at the bottom of the card changes
-        # no call argument and no call order, and the shared `st` MagicMock
-        # hands back the same object for both containers. The only observable
-        # difference is *which container is open* when `st.markdown` runs, so
-        # this gives the containers a real enter/exit that pushes and pops a
-        # stack and captures that frame as the title is written.
+        # no call argument and no call order. Only the open containers differ,
+        # so this pins two frames. The slot is created inside the row, which is
+        # what puts the name on the controls' line. The title is written into
+        # the slot from the card body, after the row has closed, so the row is
+        # absent from that frame: re-entering a container draws into it
+        # wherever it was created, which is what lets the title be written last.
         self._reset_mocks()
-        stack: list[MagicMock] = []
-        opened: list[MagicMock] = []
-        frames: list[tuple[str, tuple[MagicMock, ...]]] = []
+        _, frames = self._render_tracking_containers("af_heart", "hello", "a")
+        slot_and_title = [f for f in frames if f[0] in ("opens title_slot", "title")]
+        assert slot_and_title == [
+            ("opens title_slot", ("card", "row")),
+            ("title", ("card", "title_slot")),
+        ]
 
-        def _make_container(**_kw: Any) -> MagicMock:
-            # Named, so a failure reads `(card,) != (card, title_slot)` rather
-            # than a pair of MagicMock ids.
-            names = ("card", "title_slot")
-            n = len(opened)
-            cm = MagicMock(name=names[n] if n < len(names) else f"container{n}")
+    def test_speed_and_play_wrap_together_in_the_controls_group(self) -> None:
+        # The group is what makes the pair wrap as a unit. Loose in the row they
+        # wrapped one at a time: a short name kept its speed box on the first
+        # line and sent only Play to the second, so neighbouring cards broke at
+        # different points. Dedenting either widget out of the group changes no
+        # call argument — only which container is open when it draws.
+        self._reset_mocks()
+        _, frames = self._render_tracking_containers("af_heart", "hello", "a")
+        controls = [f for f in frames if f[0] in ("opens controls", "speed", "play")]
+        assert controls == [
+            ("opens controls", ("card", "row")),
+            ("speed", ("card", "row", "controls")),
+            ("play", ("card", "row", "controls")),
+        ]
 
-            def _enter() -> MagicMock:
-                stack.append(cm)
-                return cm
-
-            def _exit(*_a: Any) -> bool:
-                stack.pop()
-                return False
-
-            cm.__enter__.side_effect = _enter
-            cm.__exit__.side_effect = _exit
-            opened.append(cm)
-            return cm
-
-        def _record(body: str, **_kw: Any) -> None:
-            frames.append((body, tuple(stack)))
-
-        with (
-            patch.object(st, "container", side_effect=_make_container),
-            patch.object(st, "markdown", side_effect=_record),
-        ):
-            render_voice_card("af_heart", "hello", "a")
-
-        card, title_slot = opened
-        assert frames == [("**Heart (female) — A**", (card, title_slot))]
+    def test_speed_and_play_share_a_fixed_width(self) -> None:
+        # A fixed rail, not a stretch or a ratio: the name takes whatever the row
+        # leaves, so the controls' right edges line up across cards of one
+        # width. Ratio columns truncated them to "1.(" and "P…" in a
+        # narrow card and blew them up to 190 px apiece in a wide one.
+        self._reset_mocks()
+        render_voice_card("af_heart", "hello", "a")
+        selectboxes = st.selectbox.call_args_list  # ty: ignore[unresolved-attribute]
+        buttons = st.button.call_args_list  # ty: ignore[unresolved-attribute]
+        speed = next(c for c in selectboxes if c.args and c.args[0] == "Speed")
+        play = next(c for c in buttons if c.args and c.args[0] == "Play")
+        assert isinstance(CARD_CONTROL_WIDTH, int)  # pixels, not "stretch"
+        assert speed.kwargs["width"] == CARD_CONTROL_WIDTH
+        assert play.kwargs["width"] == CARD_CONTROL_WIDTH
 
     def test_renders_formatted_title(self) -> None:
         self._reset_mocks()
@@ -1160,6 +1264,43 @@ class TestRenderVoiceCard:
         render_voice_card("af_heart", "hello", "a")
         st.download_button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
+    def test_player_and_download_share_a_row(self) -> None:
+        # One horizontal row, player first, the same stretch-plus-fit shape as
+        # the controls row: the player takes whatever Download leaves, and in a
+        # card too narrow for both, Download wraps under the player instead of
+        # shrinking it to a stub with no seek bar. Centred, because the player
+        # is taller than the button. Drawn loose in the card, the two stack.
+        self._reset_mocks()
+        key = _cache_key("af_heart", "hello", 1.0, "a")
+        st.session_state[key] = {"wav": _WAV, "voice": "af_heart"}
+        opened, frames = self._render_tracking_containers("af_heart", "hello", "a")
+        drawn = ("opens player_row", "audio", "download")
+        assert [f for f in frames if f[0] in drawn] == [
+            ("opens player_row", ("card",)),
+            ("audio", ("card", "player_row")),
+            ("download", ("card", "player_row")),
+        ]
+        assert opened["player_row"] == {
+            "horizontal": True,
+            "vertical_alignment": "center",
+        }
+        del st.session_state[key]
+
+    def test_stale_preview_is_caption_over_player_without_download(self) -> None:
+        # The player row is for a clip at the current speed only. With just
+        # another speed cached, the card still draws the caption and then the
+        # old take's player straight into its body, and offers no Download.
+        self._reset_mocks()
+        stale = _cache_key("af_heart", "hello", 0.7, "a")  # not the current 1.0
+        st.session_state[stale] = {"wav": _WAV, "voice": "af_heart"}
+        opened, frames = self._render_tracking_containers("af_heart", "hello", "a")
+        assert [f for f in frames if f[0] in ("caption", "audio", "download")] == [
+            ("caption", ("card",)),
+            ("audio", ("card",)),
+        ]
+        assert "player_row" not in opened
+        del st.session_state[stale]
+
     def test_click_populates_cache_and_calls_generate(self) -> None:
         self._reset_mocks()
         st.button.return_value = True  # ty: ignore[unresolved-attribute]
@@ -1253,6 +1394,81 @@ class TestRenderVoiceCard:
         st.exception.assert_called_once()  # ty: ignore[unresolved-attribute]
         st.error.assert_not_called()  # ty: ignore[unresolved-attribute]
 
+    def _play_tracking_progress(self, outcome: dict[str, Any] | Exception) -> list[str]:
+        """Click Play with `generate_one` returning or raising `outcome`.
+
+        Returns the progress placeholder's life in order: its container opening
+        and closing around `generate_one`, and it being cleared — tagged with
+        whether the clip was already stored at that moment.
+        """
+        self._reset_mocks()
+        st.button.return_value = True  # ty: ignore[unresolved-attribute]
+        key = _cache_key("af_heart", "hello", 1.0, "a")
+        events: list[str] = []
+        progress = MagicMock(name="progress")
+        slot = progress.container.return_value
+
+        def _open() -> MagicMock:
+            events.append("open")
+            return slot
+
+        def _close(*_a: Any) -> bool:
+            events.append("close")
+            return False  # never swallow what generate_one raised
+
+        def _generate(*_a: Any) -> dict[str, Any]:
+            events.append("generate")
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        def _clear() -> None:
+            stored = key in st.session_state
+            events.append("clear (clip stored)" if stored else "clear (no clip)")
+
+        slot.__enter__.side_effect = _open
+        slot.__exit__.side_effect = _close
+        progress.empty.side_effect = _clear
+        with (
+            patch.object(st, "empty", return_value=progress),
+            patch("streamlit_app.load_pipeline"),
+            patch("streamlit_app.generate_one", side_effect=_generate),
+        ):
+            render_voice_card("af_heart", "hello", "a")
+        st.session_state.pop(key, None)
+        return events
+
+    def test_play_clears_its_progress_once_the_clip_is_stored(self) -> None:
+        # The chunk-by-chunk status is progress, not a record. Left in place, a
+        # "complete!" block sat as an extra row between the controls and the
+        # player, then vanished on the card's next rerun and jolted the player
+        # up. So generation renders into a placeholder that the handler clears
+        # once the clip is stored and the player below can stand in for it.
+        events = self._play_tracking_progress({"wav": _WAV, "voice": "af_heart"})
+        assert events == ["open", "generate", "close", "clear (clip stored)"]
+
+    @pytest.mark.parametrize(
+        ("error", "reported_with"),
+        [
+            (ValueError("No audio generated. Check your input text."), "error"),
+            (ValueError("some cryptic internal failure"), "exception"),
+            (RuntimeError("boom"), "exception"),
+        ],
+        ids=["no-audio", "unexpected-valueerror", "unexpected-exception"],
+    )
+    def test_failed_play_leaves_its_progress_in_place(
+        self, error: Exception, reported_with: str
+    ) -> None:
+        # On failure the status, in its error state, is the context for the
+        # message under it, so the placeholder is cleared on success only. One
+        # case per handler branch: clearing it in a `finally`, or in any one
+        # `except`, fails at least one of them.
+        st.error.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.exception.reset_mock()  # ty: ignore[unresolved-attribute]
+        events = self._play_tracking_progress(error)
+        assert events == ["open", "generate", "close"]
+        getattr(st, reported_with).assert_called_once()
+
     def test_click_forwards_displayed_keys_to_eviction(self) -> None:
         # The Play handler must forward every on-screen card's displayed key (plus
         # the just-written key) to _evict_old_audio, or a sibling's visible audio
@@ -1327,6 +1543,10 @@ class TestRenderPhonemes:
         st.code.reset_mock()  # ty: ignore[unresolved-attribute]
         render_phonemes("hɛlˈoʊ")
         st.expander.assert_called_once_with("Phoneme tokens", expanded=False)  # ty: ignore[unresolved-attribute]
+        # Unwrapped on purpose — don't add wrap_lines=True. Misaki puts stress
+        # marks ˈ ˌ inside words and UAX #14 allows a line break before them, so
+        # wrapping split "fˈɑðəɹ" into "f" / "ˈɑðəɹ". The exact-args assertion
+        # is what fails if the keyword comes back.
         st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_expanded_flag_forwarded(self) -> None:
@@ -1352,6 +1572,7 @@ class TestRenderPersistentPhonemes:
         st.session_state["last_phonemes"] = ("hello", "a", "hɛlˈoʊ")
         _render_persistent_phonemes("hello", "a")
         st.expander.assert_called_once_with("Phoneme tokens", expanded=True)  # ty: ignore[unresolved-attribute]
+        # Unwrapped: wrap_lines breaks words at stress marks (TestRenderPhonemes).
         st.code.assert_called_once_with("hɛlˈoʊ")  # ty: ignore[unresolved-attribute]
 
     def test_no_render_when_text_differs(self) -> None:
@@ -1517,6 +1738,63 @@ class TestEnsureRepoDownloaded:
         snapshot_download.assert_called()  # ty: ignore[unresolved-attribute]
 
 
+class TestFirstLaunchDownloadGuard:
+    """Offline with no cached model, the app shows one error and stops.
+
+    The guard is module body, which runs at import — already done once, against
+    conftest's stubs. So this re-executes the app file with `runpy` under its
+    own `streamlit` and `huggingface_hub` stand-ins, swapped into `sys.modules`
+    by `patch.dict`, which restores the table on exit. Nothing here touches
+    conftest's shared mocks or DECORATOR_KWARGS, and the re-run's functions
+    live only in runpy's throwaway namespace, so no other test can see it ran.
+    """
+
+    class _Stopped(Exception):
+        """Raised by the stand-in `st.stop`, as Streamlit's StopException is."""
+
+    def _run_app_offline(self) -> MagicMock:
+        from huggingface_hub.errors import LocalEntryNotFoundError
+
+        import streamlit_app
+
+        page = MagicMock(name="streamlit")
+
+        # Hand the function back, as conftest's shims do, but record nothing:
+        # DECORATOR_KWARGS is TestCacheSpinners' evidence.
+        def _passthrough(*args: Any, **_kw: Any) -> Any:
+            return args[0] if args else lambda func: func
+
+        page.cache_resource = page.cache_data = page.fragment = _passthrough
+        # A real language, so a sidebar hoisted above the guard fails on the
+        # sidebar assertion rather than on LANGUAGES[<MagicMock>].
+        page.selectbox.return_value = next(iter(LANGUAGES))
+        page.stop.side_effect = self._Stopped
+        hub = MagicMock(name="huggingface_hub")
+        # No cache, so the local-only lookup misses; offline, so the download
+        # that follows fails too.
+        hub.snapshot_download.side_effect = [
+            LocalEntryNotFoundError("not in the local cache"),
+            OSError("offline"),
+        ]
+        with (
+            patch.dict(sys.modules, {"streamlit": page, "huggingface_hub": hub}),
+            pytest.raises(self._Stopped),
+        ):
+            runpy.run_path(streamlit_app.__file__)
+        return page
+
+    def test_offline_first_launch_draws_only_the_error(self) -> None:
+        page = self._run_app_offline()
+        page.error.assert_called_once()
+        assert "Could not download the Kokoro model" in page.error.call_args.args[0]
+        page.stop.assert_called_once_with()
+        # Not the orientation caption, whose offline promise the failure
+        # contradicts, and not the sidebar: its language and gender filters
+        # would offer choices the stopped app can never act on.
+        page.caption.assert_not_called()
+        assert page.sidebar.mock_calls == []
+
+
 class TestVoiceGrades:
     def test_all_keys_match_voice_id_pattern(self) -> None:
         for voice in VOICE_GRADES:
@@ -1677,6 +1955,210 @@ class TestRenderLengthCaption:
         assert "long" in arg
 
 
+class _TokenizeRowRun(NamedTuple):
+    """What one `_render_tokenize_row` call drew, and the stand-ins it called."""
+
+    tracker: _ContainerTracker
+    button: Any
+    caption: Any
+    error: Any
+    load_tokenizer: Any
+    g2p: MagicMock
+
+
+class TestRenderTokenizeRow:
+    """The Tokenize button, the length caption beside it, and the click handler.
+
+    Tokenization is observed at `load_tokenizer`, patched with a recording G2P
+    stand-in: its first-use cache spinner is what must not land in the row, and
+    the real `tokenize_text` still sits between it and the handler. Patching it
+    rather than misaki's G2P classes (as TestTokenizeText does) also means the
+    real `_create_g2p` never runs, so conftest's shared misaki mocks gain no
+    calls. Every other stand-in comes from `patch.object`, which restores the
+    shared `st` mock's attributes on exit.
+    """
+
+    _PHONEMES = "hɛlˈoʊ wˈɜːld"
+
+    @pytest.fixture(autouse=True)
+    def _no_saved_phonemes(self) -> Iterator[None]:
+        # Before *and* after: the handler writes this key, and
+        # TestRenderLengthCaption and TestRenderPersistentPhonemes read it.
+        st.session_state.pop("last_phonemes", None)
+        yield
+        st.session_state.pop("last_phonemes", None)
+
+    def _render(
+        self,
+        text: str = "hello world",
+        lang_code: str = "a",
+        *,
+        clicked: bool = False,
+        fails_at: str | None = None,
+        error: Exception | None = None,
+    ) -> _TokenizeRowRun:
+        """Draw the row once. `fails_at` is "load tokenizer" (building the G2P
+        raises, as a missing UniDic dictionary does) or "tokenize" (running it
+        raises), and `error` is what is raised there."""
+        # Named in creation order, which
+        # test_button_and_caption_slot_share_a_centred_row pins.
+        tracker = _ContainerTracker("row", "caption_slot")
+        g2p = MagicMock(
+            name="g2p",
+            side_effect=tracker.draws(
+                "tokenize",
+                (self._PHONEMES, None),
+                raises=error if fails_at == "tokenize" else None,
+            ),
+        )
+        with (
+            patch.object(st, "container", side_effect=tracker.container),
+            patch.object(
+                st, "button", side_effect=tracker.draws("button", clicked)
+            ) as button,
+            patch.object(
+                st, "caption", side_effect=tracker.draws("caption")
+            ) as caption,
+            patch.object(st, "error", side_effect=tracker.draws("error")) as st_error,
+            patch(
+                "streamlit_app.load_tokenizer",
+                side_effect=tracker.draws(
+                    "load tokenizer",
+                    g2p,
+                    raises=error if fails_at == "load tokenizer" else None,
+                ),
+            ) as load,
+        ):
+            _render_tokenize_row(text, lang_code)
+        return _TokenizeRowRun(tracker, button, caption, st_error, load, g2p)
+
+    @pytest.mark.parametrize(
+        ("text", "disabled"),
+        [("", True), ("  \n\t ", True), ("hello", False)],
+        ids=["empty", "whitespace-only", "text"],
+    )
+    def test_tokenize_is_disabled_until_there_is_text(
+        self, text: str, disabled: bool
+    ) -> None:
+        # Whitespace counts as empty, as it does for the length caption: there
+        # is nothing to tokenize, and `disabled=not text` would let it through.
+        run = self._render(text)
+        run.button.assert_called_once()
+        assert run.button.call_args.args == ("Tokenize",)
+        assert run.button.call_args.kwargs["disabled"] is disabled
+
+    def test_button_and_caption_slot_share_a_centred_row(self) -> None:
+        # The caption is the button's readout, so they sit on one line: a
+        # horizontal row, button first, caption slot beside it, the caption
+        # vertically centred on the button. The slot is created in the
+        # row but written after it closes (see
+        # test_caption_follows_this_runs_tokenization); re-entering a container
+        # draws into it wherever it was created.
+        run = self._render()
+        assert run.tracker.opened == {
+            "row": {"horizontal": True, "vertical_alignment": "center"},
+            "caption_slot": {},
+        }
+        assert run.tracker.frames_of("opens row", "button", "opens caption_slot") == [
+            ("opens row", ()),
+            ("button", ("row",)),
+            ("opens caption_slot", ("row",)),
+        ]
+
+    def test_click_stores_the_tokenization(self) -> None:
+        # "b", not the default "a", so a handler that ignored lang_code fails.
+        run = self._render("hello world", "b", clicked=True)
+        run.load_tokenizer.assert_called_once_with("b")
+        run.g2p.assert_called_once_with("hello world")
+        assert st.session_state["last_phonemes"] == (
+            "hello world",
+            "b",
+            self._PHONEMES,
+        )
+
+    def test_no_click_does_not_tokenize(self) -> None:
+        run = self._render("hello world", "a", clicked=False)
+        run.load_tokenizer.assert_not_called()
+        run.g2p.assert_not_called()
+        assert "last_phonemes" not in st.session_state
+
+    def test_tokenizes_with_no_row_open(self) -> None:
+        # Below the row, not in it: tokenizing inside the row made
+        # load_tokenizer's first-use cache spinner a flex item beside the
+        # button, which knocked the caption onto a second line for the ~1.3 s
+        # the tokenizer took to build. Out here the spinner spans the column.
+        run = self._render(clicked=True)
+        assert run.tracker.frames_of("load tokenizer", "tokenize") == [
+            ("load tokenizer", ()),
+            ("tokenize", ()),
+        ]
+
+    @pytest.mark.parametrize(
+        ("lang_code", "fails_at", "error", "expected"),
+        [
+            (
+                "a",
+                "tokenize",
+                RuntimeError("g2p exploded"),
+                "Could not tokenize this text: g2p exploded",
+            ),
+            (
+                # Not a RuntimeError, so narrowing the deliberately broad
+                # `except Exception` to any one common type fails a case.
+                "a",
+                "tokenize",
+                ValueError("bad token"),
+                "Could not tokenize this text: bad token",
+            ),
+            (
+                "j",
+                "load tokenizer",
+                RuntimeError(
+                    "param.cpp(69) [ifs] no such file or directory: "
+                    "/repo/.venv/lib/python3.12/site-packages/unidic/dicdir/mecabrc"
+                ),
+                "uv run python -m unidic download",
+            ),
+        ],
+        ids=["generic", "non-runtime-error", "japanese-missing-unidic"],
+    )
+    def test_a_failed_tokenize_is_one_error_below_the_row(
+        self, lang_code: str, fails_at: str, error: Exception, expected: str
+    ) -> None:
+        # Degrades in place, full-width under the row like the spinner (a flex
+        # item beside the button would squeeze it), and the row itself survives:
+        # the caption still reads out the estimate.
+        run = self._render(
+            lang_code=lang_code, clicked=True, fails_at=fails_at, error=error
+        )
+        assert run.error.call_args_list == [
+            call(_tokenize_error_message(lang_code, error))
+        ]
+        assert expected in run.error.call_args.args[0]
+        assert run.tracker.frames_of("error", "caption") == [
+            ("error", ()),
+            ("caption", ("caption_slot",)),
+        ]
+        assert "last_phonemes" not in st.session_state
+
+    def test_caption_follows_this_runs_tokenization(self) -> None:
+        # Written into the reserved slot last, so the click that tokenizes also
+        # shows the exact count. Drawn before tokenizing, it showed the "~"
+        # estimate until some unrelated rerun.
+        run = self._render("hello world", "a", clicked=True)
+        assert run.tracker.frames_of("tokenize", "caption") == [
+            ("tokenize", ()),
+            ("caption", ("caption_slot",)),
+        ]
+        assert f"**{len(self._PHONEMES)} phonemes**" in run.caption.call_args.args[0]
+
+    def test_caption_shows_the_estimate_before_any_click(self) -> None:
+        run = self._render("hello world", "a", clicked=False)
+        assert run.tracker.frames_of("caption") == [("caption", ("caption_slot",))]
+        estimate = _estimate_phonemes("hello world", "a")
+        assert f"**~{estimate} phonemes**" in run.caption.call_args.args[0]
+
+
 class TestSampleButtonsConfig:
     def test_covers_all_languages(self) -> None:
         assert set(SAMPLE_BUTTONS.keys()) == set(LANGUAGES.values())
@@ -1791,21 +2273,37 @@ class TestRenderSampleButtons:
         st.button.reset_mock()  # ty: ignore[unresolved-attribute]
         st.button.return_value = False  # ty: ignore[unresolved-attribute]
         st.columns.reset_mock()  # ty: ignore[unresolved-attribute]
+        st.container.reset_mock()  # ty: ignore[unresolved-attribute]
         st.rerun.reset_mock()  # ty: ignore[unresolved-attribute]
         st.session_state.pop("text_input", None)
 
     def test_renders_nothing_for_unknown_language(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("xx")
-        st.columns.assert_not_called()  # ty: ignore[unresolved-attribute]
+        st.container.assert_not_called()  # ty: ignore[unresolved-attribute]
         st.button.assert_not_called()  # ty: ignore[unresolved-attribute]
 
-    def test_creates_one_column_per_button(self) -> None:
-        # Columns, not a horizontal container: the latter sizes children by
-        # their label width, giving a visibly ragged row.
+    def test_buttons_share_one_wrapping_row(self) -> None:
+        # One st.container(horizontal=True), not st.columns(3). Beside the
+        # sidebar the composer column is ~270-500 px, and even thirds of that
+        # are narrower than the labels: at a 1024 px window every label broke
+        # mid-word ("Rando/m quote", "Frank/enstei/n"). A horizontal container
+        # sizes each button from its own label and wraps *whole buttons* onto a
+        # new line when they stop fitting, at the cost of widths that track
+        # label length. The stack pins the buttons inside the row: drawn after
+        # it closes, each would take a full-width line of its own.
         self._reset_mocks()
-        _render_sample_buttons("a")
-        st.columns.assert_called_once_with(3)  # ty: ignore[unresolved-attribute]
+        tracker = _ContainerTracker("row")
+        with (
+            patch.object(st, "container", side_effect=tracker.container),
+            patch.object(st, "button", side_effect=tracker.draws("button", False)),
+        ):
+            _render_sample_buttons("a")
+        assert tracker.opened == {"row": {"horizontal": True}}
+        st.columns.assert_not_called()  # ty: ignore[unresolved-attribute]
+        assert tracker.frames_of("button") == [("button", ("row",))] * len(
+            SAMPLE_BUTTONS["a"]
+        )
 
     def test_renders_one_button_per_entry(self) -> None:
         self._reset_mocks()
@@ -1834,8 +2332,10 @@ class TestRenderSampleButtons:
         assert seen_args == expected
 
     def test_button_labels_wrap(self) -> None:
-        # Streamlit's default no longer wraps a button placed directly in a
-        # column, so long labels ("Pride & Prejudice") were cut to "Pride & …".
+        # Without it a label that outgrows its button is ellipsized ("Pride &
+        # Prejudice" rendered "Pride & …" once 1.63 stopped wrapping). The row
+        # wraps whole buttons first, so this is reached only when one label
+        # alone is wider than the column; it then wraps inside its button.
         self._reset_mocks()
         _render_sample_buttons("b")
         wraps = [c.kwargs.get("wrap") for c in st.button.call_args_list]  # ty: ignore[unresolved-attribute]
@@ -1851,7 +2351,7 @@ class TestRenderSampleButtons:
     def test_renders_for_non_english_language(self) -> None:
         self._reset_mocks()
         _render_sample_buttons("j")
-        st.columns.assert_called_once_with(3)  # ty: ignore[unresolved-attribute]
+        st.container.assert_called_once_with(horizontal=True)  # ty: ignore[unresolved-attribute]
         assert st.button.call_count == 3  # ty: ignore[unresolved-attribute]
 
     def test_button_labels_use_localized_text(self) -> None:
