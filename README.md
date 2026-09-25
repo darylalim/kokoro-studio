@@ -50,7 +50,7 @@ Streamlit application for generating multilingual speech using [Hexgrad Kokoro](
 - Per-card speed control (0.7x–1.5x in 0.1 steps); a green **Cached** badge marks voices with cached audio, and changing speed keeps the previous clip visible until you press Play again.
 - Per-card Download button for the generated WAV.
 - Chunk-by-chunk generation progress while a clip is being synthesized.
-- Streamlit's stock light theme and a custom indigo dark theme, switchable from the toolbar menu and following your system setting by default. Dark mode is contrast-checked to WCAG AA: Play labels, the length-caption colours at the opacity they are actually drawn, and every control boundary.
+- A custom indigo theme, one design mirrored across light and dark, switchable from the toolbar menu and following your system setting by default. Both modes are contrast-checked to WCAG AA: Play labels, the length-caption colours at the opacity they are actually drawn, and every control boundary.
 
 **Privacy & offline**
 

@@ -7,9 +7,9 @@ fileWatcherType = "none"
 # after the one-time model download; this key is what makes that promise true.
 gatherUsageStats = false
 
-# "Ai-iro" — a dark theme only. No root [theme] keys and no [theme.light], so
-# light mode stays Streamlit's stock theme. TestStreamlitConfig holds the
-# rationale and guards every setting in this file.
+# "Ai-iro" — Japanese indigo, one design mirrored across both modes. No root
+# [theme] keys, so neither mode leaks into the other. TestStreamlitConfig holds
+# the rationale and guards every setting in this file.
 [theme.dark]
 primaryColor = "#4e5fd2"
 backgroundColor = "#0b0e1a"
@@ -22,3 +22,19 @@ redTextColor = "#ffb4b4"
 [theme.dark.sidebar]
 primaryColor = "#afb8f2"
 borderColor = "#687296"
+
+[theme.light]
+primaryColor = "#4e5fd2"
+backgroundColor = "#f7f8fc"
+secondaryBackgroundColor = "#dfe2f0"
+textColor = "#0b0e1a"
+borderColor = "#828ba8"
+codeTextColor = "#2d3e86"
+redTextColor = "#4a002c"
+orangeTextColor = "#2b1100"
+greenTextColor = "#001c13"
+greenBackgroundColor = "#bde8c9"
+
+[theme.light.sidebar]
+primaryColor = "#2e40b8"
+borderColor = "#727b9d"
